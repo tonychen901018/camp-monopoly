@@ -581,7 +581,7 @@ function App() {
                   </div>
                   {(() => {
                     const unitPrice = Number(item.price || 0);
-                    const money = Number(data.my_team.money || 0);
+                    const money = Number(data.my_team?.money ?? 0);
                     const maxAffordable = unitPrice > 0 ? Math.floor(money / unitPrice) : 0;
                     const currentQty = Math.max(1, Number(shopQtyByItemId[item.item_id] || 1));
                     const safeQty = maxAffordable > 0 ? Math.min(currentQty, maxAffordable) : currentQty;
