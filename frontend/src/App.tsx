@@ -3,7 +3,7 @@ import { Coins, Info, MapPin, Trophy, X, ShoppingBag, Shield, Hand, Egg, Star, L
 import type { ApiResponse, AchievementData, ShopItem } from './types';
 
 // ★★★ 請確認此處網址為最新部署版本 ★★★
-const API_URL = "https://script.google.com/macros/s/AKfycbyDbznYwKSP2iSBoBfENk6JAitU7iQlETkV9UPF2aqfy78o8IRgcwNPI_evg-7vSUPUsQ/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbwenfaDlom3JrroDlX0xC0RQ95BORtR2SZ2c1P3l85LmZys5Ksxax4FwpIVn1NmJkMEmg/exec";
 
 // 自動更新間隔 (毫秒)
 // 行動改為「同一個 response 回傳最新 dashboard」後，可以降低輪詢頻率
