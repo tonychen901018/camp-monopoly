@@ -30,6 +30,7 @@ function App() {
   const [selectedAchievement, setSelectedAchievement] = useState<AchievementData | null>(null);
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
   const [isShopOpen, setIsShopOpen] = useState(false);
+  const [shopQtyByItemId, setShopQtyByItemId] = useState<Record<string, number>>({});
   
   const [targetTeam, setTargetTeam] = useState<string>('');
   
@@ -79,7 +80,7 @@ function App() {
     }
   };
 
-  const handleAction = async (action: 'BUY' | 'USE_SHIELD' | 'USE_GLOVE', itemId?: string, targetName?: string) => {
+  const handleAction = async (action: 'BUY' | 'USE_SHIELD' | 'USE_GLOVE', itemId?: string, targetName?: string, qty?: number) => {
     if (!data?.player?.id) return;
 
     // 先跳彈窗（體感更快）
@@ -111,6 +112,7 @@ function App() {
       qs.set('t', String(timestamp));
       if (itemId) qs.set('item_id', itemId);
       if (targetName) qs.set('target_team_name', targetName);
+      if (action === 'BUY' && typeof qty === 'number') qs.set('qty', String(qty));
 
       const res = await fetch(`${API_URL}?${qs.toString()}`);
       const json: ApiResponse = await res.json();
@@ -375,7 +377,14 @@ function App() {
             </h3>
             
             <button 
-              onClick={() => setIsShopOpen(true)}
+              onClick={() => {
+                const next: Record<string, number> = {};
+                (data?.shop_items || []).forEach((it) => {
+                  next[it.item_id] = Math.max(1, Number(shopQtyByItemId[it.item_id] || 1));
+                });
+                setShopQtyByItemId(next);
+                setIsShopOpen(true);
+              }}
               className="bg-[#FFD93D] border-2 border-black px-3 py-1 rounded-xl shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 hover:shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none transition-all flex items-center gap-1 font-bold text-sm rotate-1"
             >
               <ShoppingBag size={14} /> 商店
@@ -465,7 +474,7 @@ function App() {
             {activeItemModal === 'shield' && (
                 <div className="space-y-4">
                     <p className="text-md font-bold text-gray-600 bg-blue-50 p-3 rounded-xl border-2 border-blue-200">
-                        開啟後保護隊伍 5 小時，大幅降低被偷竊成功的機率（降至 10%）。
+                        開啟後保護隊伍 1 小時，降低被偷竊成功的機率（降至 30%）。
                     </p>
                     <div className="flex items-center justify-between text-sm font-bold text-gray-500 mb-2">
                         <span>剩餘數量：{data.my_team.shields}</span>
@@ -489,7 +498,7 @@ function App() {
             {activeItemModal === 'glove' && (
                 <div className="space-y-4">
                     <p className="text-md font-bold text-gray-600 bg-red-50 p-3 rounded-xl border-2 border-red-200">
-                        偷竊成功率 60%，若對方有防護罩則降為 10%。成功可獲得對方金蛋！
+                        偷竊成功率 60%，若對方有防護罩則降為 30%。成功可獲得對方金蛋！
                     </p>
                     <p className="text-sm font-black text-gray-800 mb-2">選擇目標隊伍：</p>
                     <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
@@ -570,13 +579,71 @@ function App() {
                     </div>
                     <p className="text-xs text-gray-600 font-bold mb-3">{item.description}</p>
                   </div>
-                  <button 
-                    disabled={actionLoading || !isLeader}
-                    onClick={() => handleAction('BUY', item.item_id)}
-                    className="w-full bg-yellow-400 border-2 border-black font-black py-2 rounded-lg hover:bg-yellow-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none transition-all text-sm"
-                  >
-                    {actionLoading ? "..." : isLeader ? "購買" : "權限不足"}
-                  </button>
+                  {(() => {
+                    const unitPrice = Number(item.price || 0);
+                    const money = Number(data.my_team.money || 0);
+                    const maxAffordable = unitPrice > 0 ? Math.floor(money / unitPrice) : 0;
+                    const currentQty = Math.max(1, Number(shopQtyByItemId[item.item_id] || 1));
+                    const safeQty = maxAffordable > 0 ? Math.min(currentQty, maxAffordable) : currentQty;
+                    const totalPrice = unitPrice * safeQty;
+                    const isEnough = maxAffordable > 0 && safeQty <= maxAffordable;
+                    const canBuy = isLeader && !actionLoading && isEnough;
+
+                    return (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-black text-gray-500">數量</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              aria-label="減少購買數量"
+                              onClick={() => {
+                                setShopQtyByItemId(prev => {
+                                  const prevQty = Math.max(1, Number(prev[item.item_id] || 1));
+                                  const nextQty = Math.max(1, prevQty - 1);
+                                  return { ...prev, [item.item_id]: nextQty };
+                                });
+                              }}
+                              className="w-9 h-9 bg-white border-2 border-black rounded-lg font-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none"
+                            >
+                              -
+                            </button>
+                            <div className="min-w-10 text-center font-black text-lg">{safeQty}</div>
+                            <button
+                              type="button"
+                              aria-label="增加購買數量"
+                              onClick={() => {
+                                setShopQtyByItemId(prev => {
+                                  const prevQty = Math.max(1, Number(prev[item.item_id] || 1));
+                                  const nextQty = maxAffordable > 0 ? Math.min(maxAffordable, prevQty + 1) : prevQty + 1;
+                                  return { ...prev, [item.item_id]: nextQty };
+                                });
+                              }}
+                              className="w-9 h-9 bg-white border-2 border-black rounded-lg font-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs font-black">
+                          <span className="text-gray-500">總價</span>
+                          <span className={isEnough ? "text-green-700" : "text-red-600"}>${totalPrice}</span>
+                        </div>
+                        <div className="text-[10px] font-bold text-gray-500">
+                          你有 ${money.toLocaleString()}｜最多可買 {Math.max(0, maxAffordable)}
+                        </div>
+
+                        <button 
+                          disabled={!canBuy}
+                          onClick={() => handleAction('BUY', item.item_id, undefined, safeQty)}
+                          className="w-full bg-yellow-400 border-2 border-black font-black py-2 rounded-lg hover:bg-yellow-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none transition-all text-sm"
+                        >
+                          {actionLoading ? "..." : !isLeader ? "權限不足" : !isEnough ? "金額不足" : `購買 x${safeQty}`}
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               ))}
             </div>

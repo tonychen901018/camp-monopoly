@@ -115,7 +115,7 @@ function doPost(e) {
 
   try {
     const params = JSON.parse(e.postData.contents);
-    const { action, student_id, item_id, target_team_name } = params;
+    const { action, student_id, item_id, target_team_name, qty, item_qty } = params;
     
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     
@@ -170,18 +170,23 @@ function doPost(e) {
       if (!targetItem) throw new Error("商品不存在");
       const price = Number(targetItem.price);
 
-      if (currentMoney < price) throw new Error("資金不足！");
+      const qtyRaw = (typeof qty !== "undefined" ? qty : (typeof item_qty !== "undefined" ? item_qty : 1));
+      const buyQty = Math.floor(Number(qtyRaw || 1));
+      if (!buyQty || buyQty < 1) throw new Error("購買數量無效");
 
-      teamSheet.getRange(myTeamIndex + 1, colMoney + 1).setValue(currentMoney - price);
+      const totalPrice = price * buyQty;
+      if (currentMoney < totalPrice) throw new Error("資金不足！");
+
+      teamSheet.getRange(myTeamIndex + 1, colMoney + 1).setValue(currentMoney - totalPrice);
       
       if (item_id === "glove") {
-        teamSheet.getRange(myTeamIndex + 1, colGloves + 1).setValue(currentGloves + 1);
+        teamSheet.getRange(myTeamIndex + 1, colGloves + 1).setValue(currentGloves + buyQty);
       } else if (item_id === "shield") {
-        teamSheet.getRange(myTeamIndex + 1, colShields + 1).setValue(currentShields + 1);
+        teamSheet.getRange(myTeamIndex + 1, colShields + 1).setValue(currentShields + buyQty);
       }
 
-      logToSheet(ss, student.team_name, "BUY", `Bought ${targetItem.item_name} by ${student.play_name}`, "Success");
-      resultMessage = `購買 ${targetItem.item_name} 成功！`;
+      logToSheet(ss, student.team_name, "BUY", `Bought ${targetItem.item_name} x${buyQty} by ${student.play_name}`, "Success");
+      resultMessage = `購買 ${targetItem.item_name} x${buyQty} 成功！`;
 
     } else if (action === "USE_SHIELD") {
       if (currentShields <= 0) throw new Error("沒有防護罩可使用");
@@ -189,12 +194,12 @@ function doPost(e) {
       teamSheet.getRange(myTeamIndex + 1, colShields + 1).setValue(currentShields - 1);
       
       const now = new Date();
-      now.setHours(now.getHours() + 5);
+      now.setHours(now.getHours() + 1);
       const expiryStr = now.toISOString();
       teamSheet.getRange(myTeamIndex + 1, colShieldExpiry + 1).setValue(expiryStr);
 
       logToSheet(ss, student.team_name, "USE_SHIELD", `Activated by ${student.play_name}`, expiryStr);
-      resultMessage = "防護罩已啟動！5小時內有效。";
+      resultMessage = "防護罩已啟動！1小時內有效。";
 
     } else if (action === "USE_GLOVE") {
       if (currentGloves <= 0) throw new Error("沒有黑手套可使用");
@@ -221,7 +226,7 @@ function doPost(e) {
         }
       }
 
-      const successRate = isProtected ? 0.1 : 0.6;
+      const successRate = isProtected ? 0.3 : 0.6;
       const roll = Math.random();
       const isSuccess = roll < successRate;
 
@@ -241,7 +246,7 @@ function doPost(e) {
         }
       } else {
         resultMessage = isProtected 
-          ? "對方有防護罩！偷竊失敗，被保全趕出來了！" 
+          ? "對方有防護罩！偷竊失敗！" 
           : "偷竊失敗！手滑了，什麼都沒拿到。";
         logToSheet(ss, student.team_name, "STEAL_EGG", detailLog, "FAILED");
       }
@@ -417,17 +422,22 @@ function runAction_(ss, actionType, params, studentId) {
     const targetItem = items.find(i => String(i.item_id) === itemId);
     if (!targetItem) throw new Error("商品不存在");
     const price = Number(targetItem.price);
-    if (currentMoney < price) throw new Error("資金不足！");
+    const qtyRaw = String(params.qty || params.item_qty || "1").trim();
+    const buyQty = Math.floor(Number(qtyRaw || 1));
+    if (!buyQty || buyQty < 1) throw new Error("購買數量無效");
 
-    teamSheet.getRange(myTeamIndex + 1, colMoney + 1).setValue(currentMoney - price);
+    const totalPrice = price * buyQty;
+    if (currentMoney < totalPrice) throw new Error("資金不足！");
+
+    teamSheet.getRange(myTeamIndex + 1, colMoney + 1).setValue(currentMoney - totalPrice);
     if (itemId === "glove") {
-      teamSheet.getRange(myTeamIndex + 1, colGloves + 1).setValue(currentGloves + 1);
+      teamSheet.getRange(myTeamIndex + 1, colGloves + 1).setValue(currentGloves + buyQty);
     } else if (itemId === "shield") {
-      teamSheet.getRange(myTeamIndex + 1, colShields + 1).setValue(currentShields + 1);
+      teamSheet.getRange(myTeamIndex + 1, colShields + 1).setValue(currentShields + buyQty);
     }
 
-    logToSheet(ss, student.team_name, "BUY", `Bought ${targetItem.item_name} by ${student.play_name}`, "Success");
-    return { type: "BUY", ok: true, message: `購買成功：${targetItem.item_name}` };
+    logToSheet(ss, student.team_name, "BUY", `Bought ${targetItem.item_name} x${buyQty} by ${student.play_name}`, "Success");
+    return { type: "BUY", ok: true, message: `購買成功：${targetItem.item_name} x${buyQty}` };
   }
 
   if (actionType === "USE_SHIELD") {
@@ -435,12 +445,12 @@ function runAction_(ss, actionType, params, studentId) {
 
     teamSheet.getRange(myTeamIndex + 1, colShields + 1).setValue(currentShields - 1);
     const now = new Date();
-    now.setHours(now.getHours() + 5);
+    now.setHours(now.getHours() + 1);
     const expiryStr = now.toISOString();
     teamSheet.getRange(myTeamIndex + 1, colShieldExpiry + 1).setValue(expiryStr);
 
     logToSheet(ss, student.team_name, "USE_SHIELD", `Activated by ${student.play_name}`, expiryStr);
-    return { type: "USE_SHIELD", ok: true, message: "防護罩已啟動（5 小時）" };
+    return { type: "USE_SHIELD", ok: true, message: "防護罩已啟動（1 小時）" };
   }
 
   if (actionType === "USE_GLOVE") {
@@ -469,7 +479,7 @@ function runAction_(ss, actionType, params, studentId) {
       if (expiryDate > new Date()) isProtected = true;
     }
 
-    const successRate = isProtected ? 0.1 : 0.6;
+    const successRate = isProtected ? 0.3 : 0.6;
     const roll = Math.random();
     const isSuccess = roll < successRate;
 
