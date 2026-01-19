@@ -3,7 +3,7 @@ import { Coins, Info, MapPin, Trophy, X, ShoppingBag, Shield, Hand, Egg, Star, L
 import type { ApiResponse, AchievementData, ShopItem } from './types';
 
 // ★★★ 請確認此處網址為最新部署版本 ★★★
-const API_URL = "https://script.google.com/macros/s/AKfycbwiDBvrNzKCs45hvwvCXhb65IJgGL0Ae1XZQYtkcBCI7_Xs_GZ4n2WF6J5Bp2Tg8-7Hew/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbyDbznYwKSP2iSBoBfENk6JAitU7iQlETkV9UPF2aqfy78o8IRgcwNPI_evg-7vSUPUsQ/exec";
 
 // 自動更新間隔 (毫秒)
 // 行動改為「同一個 response 回傳最新 dashboard」後，可以降低輪詢頻率
@@ -41,22 +41,41 @@ function App() {
   const isLeader = rawRole.trim().toUpperCase() === 'LEADER';
   
   const pollTimerRef = useRef<number | null>(null);
+  const fetchInFlightRef = useRef(false);
+  const fetchAbortRef = useRef<AbortController | null>(null);
 
   // --- API Calls ---
 
-  const fetchDashboardData = async (studentId: string) => {
+  const fetchDashboardData = async (studentId: string, options?: { force?: boolean }) => {
     const trimmedId = studentId.trim();
     if (!trimmedId) return null;
-    
+
+    if (fetchInFlightRef.current && !options?.force) return null;
+    fetchInFlightRef.current = true;
+    if (fetchAbortRef.current) {
+      fetchAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
+
     try {
-      // 加上時間戳記 timestamp 防止快取
-      const timestamp = new Date().getTime();
-      const response = await fetch(`${API_URL}?id=${trimmedId}&t=${timestamp}`);
+      // 用 URLSearchParams 來自動 encode（避免 ID 含 # 時被當成 URL fragment 而沒送到後端）
+      const qs = new URLSearchParams();
+      qs.set('id', trimmedId);
+      qs.set('t', String(Date.now()));
+      const response = await fetch(`${API_URL}?${qs.toString()}`, { signal: controller.signal });
       const json = await response.json();
       return json;
     } catch (err) {
-      console.error("Fetch error:", err);
+      if ((err as { name?: string })?.name !== 'AbortError') {
+        console.error("Fetch error:", err);
+      }
       return null;
+    } finally {
+      if (fetchAbortRef.current === controller) {
+        fetchAbortRef.current = null;
+      }
+      fetchInFlightRef.current = false;
     }
   };
 
@@ -386,7 +405,7 @@ function App() {
                  <div>
                    <h4 className="font-black text-lg flex items-center gap-1 text-red-900">
                      <Hand className={data?.my_team && data.my_team.gloves > 0 ? "fill-red-400 text-red-900" : "text-gray-400"} size={20} />
-                     黑手套
+                     看不見的黑手套
                    </h4>
                    <p className="text-sm font-bold text-gray-600 mt-1">x {data?.my_team?.gloves}</p>
                  </div>

@@ -23,6 +23,32 @@ const SHEET_NAMES = {
   LOGS: "Logs"
 };
 
+// Cache settings (seconds)
+const CACHE_TTL = {
+  STATIC: 300, // map/achieve/items rarely change
+  ID: 60 // ID list changes infrequently
+};
+
+function getCachedJson_(key, loaderFn, ttlSeconds) {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(key);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {}
+  }
+  const fresh = loaderFn();
+  if (fresh) {
+    cache.put(key, JSON.stringify(fresh), ttlSeconds);
+  }
+  return fresh;
+}
+
+function getRowsAsObjectsCached_(sheet, cacheKey, ttlSeconds) {
+  if (!sheet) return [];
+  return getCachedJson_(cacheKey, () => getRowsAsObjects_(sheet), ttlSeconds) || [];
+}
+
 function getSheetByNameSafe_(ss, name) {
   const exact = ss.getSheetByName(name);
   if (exact) return exact;
@@ -267,7 +293,7 @@ function handleActionAndReturnDashboard_(actionType, params, studentId) {
 function buildDashboard_(ss, studentId, actionResultOrNull) {
   // 1. 驗證學生
   const idSheet = getRequiredSheet_(ss, SHEET_NAMES.ID);
-  const idRows = getRowsAsObjects_(idSheet);
+  const idRows = getRowsAsObjectsCached_(idSheet, "cache:id_rows", CACHE_TTL.ID);
   const student = idRows.find(r => String(r.id) === String(studentId));
   if (!student) throw new Error("無效的學生 ID");
 
@@ -290,7 +316,7 @@ function buildDashboard_(ss, studentId, actionResultOrNull) {
   const itemSheet = getSheetByNameSafe_(ss, SHEET_NAMES.ITEMS);
   let shopItems = [];
   if (itemSheet) {
-    const allItems = getRowsAsObjects_(itemSheet);
+    const allItems = getRowsAsObjectsCached_(itemSheet, "cache:item_rows", CACHE_TTL.STATIC);
     shopItems = allItems.filter(i => i.item_id && i.price).slice(0, 2);
   }
 
@@ -299,11 +325,11 @@ function buildDashboard_(ss, studentId, actionResultOrNull) {
   const statusRow = statusSheet ? getRow2AsObject_(statusSheet) : {};
 
   const mapSheet = getSheetByNameSafe_(ss, SHEET_NAMES.MAP_INFO);
-  const mapRows = mapSheet ? getRowsAsObjects_(mapSheet) : [];
+  const mapRows = mapSheet ? getRowsAsObjectsCached_(mapSheet, "cache:map_rows", CACHE_TTL.STATIC) : [];
   const mapInfo = mapRows.find(r => String(r.location_name) === String(statusRow.location_name));
 
   const achieveSheet = getSheetByNameSafe_(ss, SHEET_NAMES.ACHIEVE_INFO);
-  const achieveRows = achieveSheet ? getRowsAsObjects_(achieveSheet) : [];
+  const achieveRows = achieveSheet ? getRowsAsObjectsCached_(achieveSheet, "cache:achieve_rows", CACHE_TTL.STATIC) : [];
   const achievements = ["achieve_1", "achieve_2", "achieve_3"].map(key => {
     const info = achieveRows.find(r => String(r.achieve_id) === key);
     return {
@@ -350,7 +376,7 @@ function buildDashboard_(ss, studentId, actionResultOrNull) {
 function runAction_(ss, actionType, params, studentId) {
   // 驗證學生與 role
   const idSheet = getRequiredSheet_(ss, SHEET_NAMES.ID);
-  const idRows = getRowsAsObjects_(idSheet);
+  const idRows = getRowsAsObjectsCached_(idSheet, "cache:id_rows", CACHE_TTL.ID);
   const student = idRows.find(r => String(r.id) === String(studentId));
   if (!student) throw new Error("無效的學生 ID");
 
@@ -387,7 +413,7 @@ function runAction_(ss, actionType, params, studentId) {
     const itemId = String(params.item_id || "").trim();
     if (!itemId) throw new Error("缺少 item_id");
     const itemSheet = ss.getSheetByName(SHEET_NAMES.ITEMS);
-    const items = getRowsAsObjects_(itemSheet);
+    const items = getRowsAsObjectsCached_(itemSheet, "cache:item_rows", CACHE_TTL.STATIC);
     const targetItem = items.find(i => String(i.item_id) === itemId);
     if (!targetItem) throw new Error("商品不存在");
     const price = Number(targetItem.price);
