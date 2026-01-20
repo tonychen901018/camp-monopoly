@@ -332,14 +332,15 @@ function App() {
         if (!json?.success) return;
         const windowEnd = String(json.attack_window_end || "");
         const targetId = String(json.current_target_id || "");
-        if (windowEnd) {
+        const isValidWindow = Boolean(windowEnd) && !Number.isNaN(new Date(windowEnd).getTime()) && new Date(windowEnd) > new Date();
+        if (isValidWindow && targetId) {
           setChargeWindowEnd(windowEnd);
           setChargeTargetId(targetId);
           setIsChargeOpen(true);
         } else {
           setChargeWindowEnd("");
           setChargeTargetId("");
-          if (!isLeader) setIsChargeOpen(false);
+          setIsChargeOpen(false);
         }
       } catch (err) {
         console.error(err);
