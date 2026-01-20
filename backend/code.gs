@@ -29,6 +29,11 @@ const CACHE_TTL = {
   ID: 60 // ID list changes infrequently
 };
 
+// --- Team Attack (Charge) settings ---
+const ATTACK_WINDOW_MS = 20 * 1000;
+const ATTACK_STATUS_CACHE_TTL = 120; // seconds
+const ATTACK_CLICKS_CACHE_TTL = 600; // seconds
+
 function getCachedJson_(key, loaderFn, ttlSeconds) {
   const cache = CacheService.getScriptCache();
   const cached = cache.get(key);
@@ -42,6 +47,103 @@ function getCachedJson_(key, loaderFn, ttlSeconds) {
     cache.put(key, JSON.stringify(fresh), ttlSeconds);
   }
   return fresh;
+}
+
+function getAttackStatusCacheKey_(teamId) {
+  return `cache:atk_status:${teamId}`;
+}
+
+function getAttackClicksCacheKey_(teamId) {
+  return `cache:atk_clicks:${teamId}`;
+}
+
+function readAttackStatusFromSheet_(ss, teamId) {
+  const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS, ["Team"]);
+  const teamData = teamSheet.getDataRange().getValues();
+  const headers = teamData[0].map(h => String(h).trim().toLowerCase());
+  const colTeamId = headers.indexOf("team_id");
+  const colAttackWindowEnd = headers.indexOf("attack_window_end");
+  const colCurrentTargetId = headers.indexOf("current_target_id");
+  if (colTeamId === -1) throw new Error("缺少欄位 team_id");
+  if (colAttackWindowEnd === -1 || colCurrentTargetId === -1) throw new Error("缺少欄位 attack_window_end / current_target_id");
+
+  let idx = -1;
+  for (let i = 1; i < teamData.length; i++) {
+    if (String(teamData[i][colTeamId]) === String(teamId)) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx === -1) throw new Error("找不到隊伍資料");
+
+  return {
+    success: true,
+    attack_window_end: teamData[idx][colAttackWindowEnd] || "",
+    current_target_id: teamData[idx][colCurrentTargetId] || ""
+  };
+}
+
+function checkAttackStatusFast_(ss, teamId) {
+  const cache = CacheService.getScriptCache();
+  const key = getAttackStatusCacheKey_(teamId);
+  const cached = cache.get(key);
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached);
+      const end = parsed?.attack_window_end ? new Date(parsed.attack_window_end) : null;
+      if (end && end > new Date()) return parsed;
+      cache.remove(key);
+    } catch (e) {
+      cache.remove(key);
+    }
+  }
+
+  const status = readAttackStatusFromSheet_(ss, teamId);
+  const end2 = status.attack_window_end ? new Date(status.attack_window_end) : null;
+  if (end2 && end2 > new Date()) {
+    cache.put(key, JSON.stringify(status), ATTACK_STATUS_CACHE_TTL);
+  }
+  return status;
+}
+
+function submitClicksFast_(ss, teamId, clicksRaw) {
+  const clicks = Math.max(0, Math.floor(Number(clicksRaw || 0)));
+  if (!clicks) return { success: true };
+
+  const cache = CacheService.getScriptCache();
+  const statusKey = getAttackStatusCacheKey_(teamId);
+  let status = null;
+  const cached = cache.get(statusKey);
+  if (cached) {
+    try { status = JSON.parse(cached); } catch (e) {}
+  }
+  if (!status) {
+    // cache miss: 讀一次 sheet，若仍有效就回填 cache 後繼續（避免 cache 被清掉造成隊員點擊全丟）
+    const sheetStatus = readAttackStatusFromSheet_(ss, teamId);
+    const end = sheetStatus.attack_window_end ? new Date(sheetStatus.attack_window_end) : null;
+    if (!end || end <= new Date()) return { success: false, message: "目前沒有攻擊窗口" };
+    cache.put(statusKey, JSON.stringify(sheetStatus), ATTACK_STATUS_CACHE_TTL);
+    status = sheetStatus;
+  }
+  const end2 = status.attack_window_end ? new Date(status.attack_window_end) : null;
+  if (!end2 || end2 <= new Date()) return { success: false, message: "攻擊窗口已結束" };
+
+  const clicksKey = getAttackClicksCacheKey_(teamId);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(2000);
+  } catch (e) {
+    return { success: false, message: "系統忙碌中，請稍後再試" };
+  }
+  try {
+    const current = Number(cache.get(clicksKey) || 0);
+    cache.put(clicksKey, String(current + clicks), ATTACK_CLICKS_CACHE_TTL);
+    lock.releaseLock();
+    return { success: true };
+  } catch (err) {
+    lock.releaseLock();
+    return { success: false, message: err.toString() };
+  }
 }
 
 function getRowsAsObjectsCached_(sheet, cacheKey, ttlSeconds) {
@@ -88,6 +190,25 @@ function doGet(e) {
 
     // 行動模式：用 GET 觸發，避免瀏覽器 CORS/no-cors 無法讀取 POST response 的問題
     if (actionType) {
+      // --- Team Attack (Charge) APIs ---
+      if (actionType === "CHECK_ATTACK_STATUS") {
+        const teamId = String(params.team_id || "").trim();
+        if (!teamId) throw new Error("Missing team_id");
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        return jsonResponse_(checkAttackStatusFast_(ss, teamId));
+      }
+      if (actionType === "SUBMIT_CLICKS") {
+        const teamId = String(params.team_id || "").trim();
+        if (!teamId) throw new Error("Missing team_id");
+        const clicks = Number(params.clicks || 0);
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        return jsonResponse_(submitClicksFast_(ss, teamId, clicks));
+      }
+      if (actionType === "START_ATTACK" || actionType === "FINALIZE_ATTACK") {
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        return jsonResponse_(handleTeamAttackAction_(ss, actionType, params));
+      }
+
       const studentIdForAction = String(params.student_id || "").trim();
       if (!studentIdForAction) throw new Error("Missing student_id");
       return handleActionAndReturnDashboard_(actionType, params, studentIdForAction);
@@ -279,6 +400,224 @@ function jsonResponse_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
+function handleTeamAttackAction_(ss, actionType, params) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (e) {
+    return { success: false, message: "系統忙碌中，請稍後再試" };
+  }
+
+  try {
+    const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS, ["Team"]);
+    const teamData = teamSheet.getDataRange().getValues();
+    const headers = teamData[0].map(h => String(h).trim().toLowerCase());
+
+    const colTeamId = headers.indexOf("team_id");
+    const colTeamName = headers.indexOf("team_name");
+    const colGloves = headers.indexOf("gloves");
+    const colShieldExpiry = headers.indexOf("shield_expiry");
+    const colHasEgg = headers.indexOf("has_egg");
+    const colAttackWindowEnd = headers.indexOf("attack_window_end");
+    const colCurrentTargetId = headers.indexOf("current_target_id");
+    const colTempClicks = headers.indexOf("temp_clicks");
+    const colGloveWindowStart = headers.indexOf("glove_window_start");
+    const colGloveWindowCount = headers.indexOf("glove_window_count");
+    const colGloveCooldownUntil = headers.indexOf("glove_cooldown_until");
+
+    if (colTeamId === -1) throw new Error("缺少欄位 team_id");
+    if (colTeamName === -1) throw new Error("缺少欄位 team_name");
+    if (colAttackWindowEnd === -1 || colCurrentTargetId === -1 || colTempClicks === -1) {
+      throw new Error("缺少欄位 attack_window_end / current_target_id / temp_clicks");
+    }
+    if (colGloves === -1) throw new Error("缺少欄位 gloves");
+    if (colGloveWindowStart === -1 || colGloveWindowCount === -1 || colGloveCooldownUntil === -1) {
+      throw new Error("缺少冷卻欄位：glove_window_start / glove_window_count / glove_cooldown_until");
+    }
+
+    const studentId = String(params.student_id || "").trim();
+    if (!studentId) throw new Error("Missing student_id");
+    const idSheet = getRequiredSheet_(ss, SHEET_NAMES.ID);
+    const idRows = getRowsAsObjectsCached_(idSheet, "cache:id_rows", CACHE_TTL.ID);
+    const student = idRows.find(r => String(r.id) === String(studentId));
+    if (!student) throw new Error("無效的學生 ID");
+    if (String(student.role || "").trim().toUpperCase() !== "LEADER") {
+      throw new Error("只有小隊長可以使用此功能！");
+    }
+
+    // 找到隊長所屬隊伍 row
+    let attackerIdx = -1;
+    for (let i = 1; i < teamData.length; i++) {
+      if (String(teamData[i][colTeamName]) === String(student.team_name)) {
+        attackerIdx = i;
+        break;
+      }
+    }
+    if (attackerIdx === -1) throw new Error("找不到你的隊伍資料");
+    const attackerTeamId = String(teamData[attackerIdx][colTeamId]);
+
+    if (actionType === "START_ATTACK") {
+      const targetTeamId = String(params.target_team_id || "").trim();
+      if (!targetTeamId) throw new Error("Missing target_team_id");
+
+      // 目標存在
+      let targetIdx = -1;
+      for (let i = 1; i < teamData.length; i++) {
+        if (String(teamData[i][colTeamId]) === String(targetTeamId)) {
+          targetIdx = i;
+          break;
+        }
+      }
+      if (targetIdx === -1) throw new Error("目標隊伍不存在");
+
+      // 手套 + 冷卻
+      const currentGloves = Number(teamData[attackerIdx][colGloves] || 0);
+      if (currentGloves <= 0) throw new Error("沒有黑手套可使用");
+
+      const now = new Date();
+      const cooldownRaw = teamData[attackerIdx][colGloveCooldownUntil];
+      if (cooldownRaw) {
+        const cooldownUntil = new Date(cooldownRaw);
+        if (cooldownUntil > now) throw new Error("黑手套冷卻中");
+      }
+
+      // 防止重複開窗
+      const existingWindowEnd = teamData[attackerIdx][colAttackWindowEnd];
+      if (existingWindowEnd && new Date(existingWindowEnd) > now) throw new Error("攻擊正在進行中");
+
+      // 扣手套 + 更新冷卻視窗（與 USE_GLOVE 同規則）
+      const windowStartRaw = teamData[attackerIdx][colGloveWindowStart];
+      const windowCountRaw = teamData[attackerIdx][colGloveWindowCount];
+      const windowStart = windowStartRaw ? new Date(windowStartRaw) : null;
+      const windowCount = Math.max(0, Math.floor(Number(windowCountRaw || 0)));
+      const within5Min = windowStart ? (now.getTime() - windowStart.getTime() <= 5 * 60 * 1000) : false;
+      const nextWindowStart = within5Min ? windowStart : now;
+      const nextCount = within5Min ? windowCount + 1 : 1;
+
+      teamSheet.getRange(attackerIdx + 1, colGloves + 1).setValue(currentGloves - 1);
+      teamSheet.getRange(attackerIdx + 1, colGloveWindowStart + 1).setValue(nextWindowStart.toISOString());
+      teamSheet.getRange(attackerIdx + 1, colGloveWindowCount + 1).setValue(nextCount);
+
+      if (nextCount >= 3) {
+        const cdUntil = new Date(now.getTime() + 20 * 60 * 1000);
+        teamSheet.getRange(attackerIdx + 1, colGloveCooldownUntil + 1).setValue(cdUntil.toISOString());
+        teamSheet.getRange(attackerIdx + 1, colGloveWindowStart + 1).setValue("");
+        teamSheet.getRange(attackerIdx + 1, colGloveWindowCount + 1).setValue(0);
+      }
+
+      const windowEnd = new Date(now.getTime() + ATTACK_WINDOW_MS);
+      const windowEndStr = windowEnd.toISOString();
+      teamSheet.getRange(attackerIdx + 1, colAttackWindowEnd + 1).setValue(windowEndStr);
+      teamSheet.getRange(attackerIdx + 1, colCurrentTargetId + 1).setValue(String(targetTeamId));
+      teamSheet.getRange(attackerIdx + 1, colTempClicks + 1).setValue(0);
+
+      // Cache：狀態 + 點擊歸零
+      const cache = CacheService.getScriptCache();
+      cache.put(getAttackStatusCacheKey_(attackerTeamId), JSON.stringify({ success: true, attack_window_end: windowEndStr, current_target_id: String(targetTeamId) }), ATTACK_STATUS_CACHE_TTL);
+      cache.put(getAttackClicksCacheKey_(attackerTeamId), "0", ATTACK_CLICKS_CACHE_TTL);
+
+      lock.releaseLock();
+      return { success: true, attack_window_end: windowEndStr, current_target_id: String(targetTeamId) };
+    }
+
+    if (actionType === "FINALIZE_ATTACK") {
+      const now = new Date();
+
+      // 讀取目標與窗口（優先 sheet；若 sheet 空但 cache 有，仍可結算）
+      let windowEndStr = String(teamData[attackerIdx][colAttackWindowEnd] || "");
+      let targetTeamId = String(teamData[attackerIdx][colCurrentTargetId] || "").trim();
+
+      if (!windowEndStr || !targetTeamId) {
+        const cached = CacheService.getScriptCache().get(getAttackStatusCacheKey_(attackerTeamId));
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached);
+            windowEndStr = String(parsed.attack_window_end || "");
+            targetTeamId = String(parsed.current_target_id || "").trim();
+          } catch (e) {}
+        }
+      }
+      if (!windowEndStr || !targetTeamId) throw new Error("目前沒有攻擊窗口");
+
+      const windowEnd = new Date(windowEndStr);
+      if (windowEnd > now) throw new Error("攻擊窗口尚未結束");
+
+      // 目標 index
+      let targetIdx = -1;
+      for (let i = 1; i < teamData.length; i++) {
+        if (String(teamData[i][colTeamId]) === String(targetTeamId)) {
+          targetIdx = i;
+          break;
+        }
+      }
+      if (targetIdx === -1) throw new Error("目標隊伍不存在");
+
+      const cache = CacheService.getScriptCache();
+      const cachedClicks = Math.max(0, Math.floor(Number(cache.get(getAttackClicksCacheKey_(attackerTeamId)) || 0)));
+      const sheetClicks = Math.max(0, Math.floor(Number(teamData[attackerIdx][colTempClicks] || 0)));
+      const totalClicks = cachedClicks + sheetClicks;
+
+      // 盾判定
+      const targetExpiryRaw = colShieldExpiry !== -1 ? teamData[targetIdx][colShieldExpiry] : "";
+      let isProtected = false;
+      if (targetExpiryRaw) {
+        const expiryDate = new Date(targetExpiryRaw);
+        if (expiryDate > new Date()) isProtected = true;
+      }
+
+      const baseRate = isProtected ? 0.1 : 0.6;
+      const bonusRate = Math.min(0.3, Math.floor(totalClicks / 100) * 0.01);
+      const successRate = Math.min(0.95, baseRate + bonusRate);
+      const roll = Math.random();
+      const isSuccess = roll < successRate;
+
+      let stolen = false;
+      let message = "";
+      const attackerTeamName = String(teamData[attackerIdx][colTeamName] || "");
+      const targetTeamName = String(teamData[targetIdx][colTeamName] || "");
+      const detail = `Target=${targetTeamName}(${targetTeamId}), Clicks=${totalClicks}, Base=${baseRate.toFixed(2)}, Bonus=${bonusRate.toFixed(2)}, Rate=${successRate.toFixed(2)}, Roll=${roll.toFixed(2)}, Protected=${isProtected}`;
+
+      if (isSuccess) {
+        const targetHasEgg = Boolean(teamData[targetIdx][colHasEgg]);
+        if (targetHasEgg) {
+          teamSheet.getRange(targetIdx + 1, colHasEgg + 1).setValue(false);
+          teamSheet.getRange(attackerIdx + 1, colHasEgg + 1).setValue(true);
+          if (colShieldExpiry !== -1) {
+            teamSheet.getRange(targetIdx + 1, colShieldExpiry + 1).setValue("");
+          }
+          stolen = true;
+          message = "偷竊成功！搶到金蛋！";
+          logToSheet(ss, attackerTeamName, "TEAM_ATTACK", detail, "SUCCESS_GOT_EGG");
+        } else {
+          message = "結算成功，但對方沒有金蛋";
+          logToSheet(ss, attackerTeamName, "TEAM_ATTACK", detail, "SUCCESS_EMPTY");
+        }
+      } else {
+        message = isProtected ? "偷竊失敗：對方有防護罩" : "偷竊失敗：運氣不佳";
+        logToSheet(ss, attackerTeamName, "TEAM_ATTACK", detail, "FAILED");
+      }
+
+      // 清理 sheet
+      teamSheet.getRange(attackerIdx + 1, colAttackWindowEnd + 1).setValue("");
+      teamSheet.getRange(attackerIdx + 1, colCurrentTargetId + 1).setValue("");
+      teamSheet.getRange(attackerIdx + 1, colTempClicks + 1).setValue(0);
+
+      // 清理 cache
+      cache.remove(getAttackStatusCacheKey_(attackerTeamId));
+      cache.remove(getAttackClicksCacheKey_(attackerTeamId));
+
+      lock.releaseLock();
+      return { success: true, stolen: stolen, message: message, total_clicks: totalClicks };
+    }
+
+    lock.releaseLock();
+    return { success: false, message: "Unknown Action" };
+  } catch (err) {
+    lock.releaseLock();
+    return { success: false, message: err.toString() };
+  }
+}
+
 function handleActionAndReturnDashboard_(actionType, params, studentId) {
   const lock = LockService.getScriptLock();
   try {
@@ -360,6 +699,7 @@ function buildDashboard_(ss, studentId, actionResultOrNull) {
       role: String(student.role || "MEMBER").trim().toUpperCase()
     },
     my_team: {
+      team_id: String(myTeam.team_id || ""),
       money: Number(myTeam.money || 0),
       exp: Number(myTeam.exp || 0),
       has_egg: Boolean(myTeam.has_egg),

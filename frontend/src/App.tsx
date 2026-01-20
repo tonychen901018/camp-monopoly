@@ -3,7 +3,7 @@ import { Coins, Info, MapPin, Trophy, X, ShoppingBag, Shield, Hand, Egg, Star, L
 import type { ApiResponse, AchievementData, ShopItem } from './types';
 
 // ★★★ 請確認此處網址為最新部署版本 ★★★
-const API_URL = "https://script.google.com/macros/s/AKfycbyYscR_MoZbrq6Qmu1zAuu377-yRSr2Lzsj5gwODq9PHskLzLquMvdYDwsXuER5lN2ROg/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbxdW0m3Jga74QyYcUhXX9GIJXcNYILFMU42OkSTdo-hDIcSWy7w_Be6uXQYuV9p9pcqig/exec";
 
 // 自動更新間隔 (毫秒)
 // 行動改為「同一個 response 回傳最新 dashboard」後，可以降低輪詢頻率
@@ -32,8 +32,12 @@ function App() {
   const [isShopOpen, setIsShopOpen] = useState(false);
   const [shopQtyByItemId, setShopQtyByItemId] = useState<Record<string, number>>({});
   
-  const [targetTeam, setTargetTeam] = useState<string>('');
+  const [targetTeamId, setTargetTeamId] = useState<string>('');
   const [nowTick, setNowTick] = useState<number>(() => Date.now());
+  const [isChargeOpen, setIsChargeOpen] = useState(false);
+  const [chargeClicks, setChargeClicks] = useState(0);
+  const [chargeWindowEnd, setChargeWindowEnd] = useState<string>('');
+  const [chargeTargetId, setChargeTargetId] = useState<string>('');
   
   // 修改：控制道具彈窗狀態 (取代展開)
   const [activeItemModal, setActiveItemModal] = useState<null | 'shield' | 'glove'>(null);
@@ -45,6 +49,9 @@ function App() {
   const pollTimerRef = useRef<number | null>(null);
   const fetchInFlightRef = useRef(false);
   const fetchAbortRef = useRef<AbortController | null>(null);
+  const chargeClicksRef = useRef(0);
+  const chargeSubmitTimerRef = useRef<number | null>(null);
+  const finalizeTimerRef = useRef<number | null>(null);
 
   // --- API Calls ---
 
@@ -133,7 +140,7 @@ function App() {
       localStorage.setItem(`${LS_CACHE_PREFIX}${json.player?.id || data.player.id}`, JSON.stringify({ t: Date.now(), data: json }));
 
       // 行動成功後，關閉彈窗與清空目標
-      setTargetTeam('');
+      setTargetTeamId('');
 
       const ok = json.action?.ok ?? true;
       setResultModal({
@@ -153,6 +160,52 @@ function App() {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const checkAttackStatus = async (teamId: string) => {
+    if (!data?.player?.id) return { success: false };
+    const qs = new URLSearchParams();
+    qs.set('action', 'CHECK_ATTACK_STATUS');
+    qs.set('team_id', teamId);
+    qs.set('student_id', data.player.id);
+    qs.set('t', String(Date.now()));
+    const res = await fetch(`${API_URL}?${qs.toString()}`);
+    return res.json();
+  };
+
+  const submitClicks = async (teamId: string, clicks: number) => {
+    if (!data?.player?.id) return { success: false };
+    const qs = new URLSearchParams();
+    qs.set('action', 'SUBMIT_CLICKS');
+    qs.set('team_id', teamId);
+    qs.set('clicks', String(clicks));
+    qs.set('student_id', data.player.id);
+    qs.set('t', String(Date.now()));
+    const res = await fetch(`${API_URL}?${qs.toString()}`);
+    return res.json();
+  };
+
+  const startAttack = async (attackerTeamId: string, targetTeamIdParam: string) => {
+    if (!data?.player?.id) return { success: false };
+    const qs = new URLSearchParams();
+    qs.set('action', 'START_ATTACK');
+    qs.set('attacker_team_id', attackerTeamId);
+    qs.set('target_team_id', targetTeamIdParam);
+    qs.set('student_id', data.player.id);
+    qs.set('t', String(Date.now()));
+    const res = await fetch(`${API_URL}?${qs.toString()}`);
+    return res.json();
+  };
+
+  const finalizeAttack = async (attackerTeamId: string) => {
+    if (!data?.player?.id) return { success: false };
+    const qs = new URLSearchParams();
+    qs.set('action', 'FINALIZE_ATTACK');
+    qs.set('attacker_team_id', attackerTeamId);
+    qs.set('student_id', data.player.id);
+    qs.set('t', String(Date.now()));
+    const res = await fetch(`${API_URL}?${qs.toString()}`);
+    return res.json();
   };
 
   // --- Auth & Init ---
@@ -258,6 +311,183 @@ function App() {
     return () => window.clearInterval(timer);
   }, []);
 
+  const submitPendingClicks = async (teamId: string) => {
+    const pending = chargeClicksRef.current;
+    if (pending <= 0) return;
+    chargeClicksRef.current = 0;
+    try {
+      await submitClicks(teamId, pending);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // SyncManager：輪詢攻擊窗口（每 3 秒）
+  useEffect(() => {
+    if (!isLoggedIn || !data?.my_team?.team_id) return;
+    const teamId = data.my_team.team_id;
+    const timer = window.setInterval(async () => {
+      try {
+        const json = await checkAttackStatus(teamId);
+        if (!json?.success) return;
+        const windowEnd = String(json.attack_window_end || "");
+        const targetId = String(json.current_target_id || "");
+        if (windowEnd) {
+          setChargeWindowEnd(windowEnd);
+          setChargeTargetId(targetId);
+          setIsChargeOpen(true);
+        } else {
+          setChargeWindowEnd("");
+          setChargeTargetId("");
+          if (!isLeader) setIsChargeOpen(false);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [isLoggedIn, data?.my_team?.team_id, isLeader]);
+
+  // 集氣期間：每 5 秒上傳一次點擊
+  useEffect(() => {
+    if (!isChargeOpen || !data?.my_team?.team_id) return;
+    const teamId = data.my_team.team_id;
+    if (chargeSubmitTimerRef.current) {
+      window.clearInterval(chargeSubmitTimerRef.current);
+    }
+    chargeSubmitTimerRef.current = window.setInterval(() => {
+      void submitPendingClicks(teamId);
+    }, 5000);
+    return () => {
+      if (chargeSubmitTimerRef.current) {
+        window.clearInterval(chargeSubmitTimerRef.current);
+        chargeSubmitTimerRef.current = null;
+      }
+      void submitPendingClicks(teamId);
+    };
+  }, [isChargeOpen, data?.my_team?.team_id]);
+
+  // 隊長自動結算（以攻擊結束時間排程）
+  useEffect(() => {
+    if (!isLeader || !data?.my_team?.team_id || !chargeWindowEnd) return;
+    const teamId = data.my_team.team_id;
+    const windowEnd = new Date(chargeWindowEnd);
+    const delayMs = Math.max(0, windowEnd.getTime() - Date.now() + 2000);
+    if (finalizeTimerRef.current) return;
+    finalizeTimerRef.current = window.setTimeout(async () => {
+      await submitPendingClicks(teamId);
+      const json = await finalizeAttack(teamId);
+      setIsChargeOpen(false);
+      setChargeWindowEnd("");
+      setChargeTargetId("");
+      setChargeClicks(0);
+      chargeClicksRef.current = 0;
+
+      if (!json?.success) {
+        setResultModal({
+          isOpen: true,
+          type: 'error',
+          title: '結算失敗',
+          message: json?.message || '未知錯誤'
+        });
+      } else {
+        setResultModal({
+          isOpen: true,
+          type: json.stolen ? 'success' : 'error',
+          title: json.stolen ? '偷竊成功' : '偷竊失敗',
+          message: json.message || (json.stolen ? '成功奪回金蛋' : '未能偷到金蛋')
+        });
+        if (data?.player?.id) {
+          const refreshed = await fetchDashboardData(data.player.id, { force: true });
+          if (refreshed && refreshed.success) {
+            setData(refreshed);
+          }
+        }
+      }
+      finalizeTimerRef.current = null;
+    }, delayMs);
+    return () => {
+      if (finalizeTimerRef.current) {
+        window.clearTimeout(finalizeTimerRef.current);
+        finalizeTimerRef.current = null;
+      }
+    };
+  }, [chargeWindowEnd, isLeader, data?.my_team?.team_id, data?.player?.id]);
+
+  // 開啟新一輪集氣時重置
+  useEffect(() => {
+    if (!isChargeOpen) {
+      setChargeClicks(0);
+      chargeClicksRef.current = 0;
+    }
+  }, [isChargeOpen]);
+
+
+  const handleChargeClick = () => {
+    if (!isAttackActive) return;
+    chargeClicksRef.current += 1;
+    setChargeClicks(prev => prev + 1);
+  };
+
+  const handleStartAttack = async () => {
+    if (!data?.my_team?.team_id) {
+      setResultModal({
+        isOpen: true,
+        type: 'error',
+        title: '缺少隊伍 ID',
+        message: '請確認 Teams 表有 team_id，並重新部署後再試一次。'
+      });
+      return;
+    }
+    if (!targetTeamId) {
+      setResultModal({
+        isOpen: true,
+        type: 'error',
+        title: '請先選擇目標',
+        message: '請先選擇要偷竊的隊伍'
+      });
+      return;
+    }
+    if (!isLeader) {
+      setResultModal({
+        isOpen: true,
+        type: 'error',
+        title: '權限不足',
+        message: '只有小隊長可以發起攻擊'
+      });
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const json = await startAttack(data.my_team.team_id, targetTeamId);
+      if (!json?.success) {
+        setResultModal({
+          isOpen: true,
+          type: 'error',
+          title: '發起失敗',
+          message: json?.message || '未知錯誤'
+        });
+        return;
+      }
+      setActiveItemModal(null);
+      setChargeWindowEnd(String(json.attack_window_end || ""));
+      setChargeTargetId(String(json.current_target_id || targetTeamId));
+      setIsChargeOpen(true);
+      setChargeClicks(0);
+      chargeClicksRef.current = 0;
+      setTargetTeamId('');
+    } catch (err) {
+      console.error(err);
+      setResultModal({
+        isOpen: true,
+        type: 'error',
+        title: '連線錯誤',
+        message: '網路連線異常，請稍後再試'
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const closeAllModals = () => {
     setSelectedAchievement(null);
@@ -313,6 +543,12 @@ function App() {
     : '';
   // 前5個隊伍 (排除自己) 用於偷竊列表
   const otherTeams5 = (data.other_teams || []).slice(0, 5);
+  const attackWindowEndDate = chargeWindowEnd ? new Date(chargeWindowEnd) : null;
+  const attackRemainingMs = attackWindowEndDate ? attackWindowEndDate.getTime() - nowTick : 0;
+  const attackRemainingSec = Math.max(0, Math.ceil(attackRemainingMs / 1000));
+  const isAttackActive = attackRemainingMs > 0;
+  const attackProgressPercent = Math.max(0, Math.min(100, (attackRemainingMs / (20 * 1000)) * 100));
+  const currentTargetName = (data.other_teams || []).find(t => String(t.team_id) === String(chargeTargetId))?.team_name || "未知目標";
 
   return (
     <div className={`min-h-screen pb-24 relative overflow-x-hidden ${data.my_team.has_egg ? 'bg-yellow-50' : 'bg-[#fdf6e3]'} text-black font-sans transition-colors duration-500`}>
@@ -566,7 +802,7 @@ function App() {
             {activeItemModal === 'glove' && (
                 <div className="space-y-4">
                     <p className="text-md font-bold text-gray-600 bg-red-50 p-3 rounded-xl border-2 border-red-200">
-                        偷竊成功率 60%，若對方有防護罩則降為 30%。成功可獲得對方金蛋！
+                        基礎成功率：無盾 60% / 有盾 10%。集氣每 100 點 +1%（最多 +30%）。
                     </p>
                     {isGloveOnCooldown && (
                       <div className="bg-red-100 border-2 border-red-400 text-red-800 font-black p-3 rounded-xl">
@@ -578,22 +814,52 @@ function App() {
                         {otherTeams5.map((t) => (
                             <button
                                 key={t.team_id}
-                                onClick={() => setTargetTeam(t.team_name)}
-                                className={`text-sm font-bold py-3 px-2 rounded-xl border-2 transition-all ${targetTeam === t.team_name ? 'bg-black text-white border-black shadow-[2px_2px_0px_0px_rgba(100,100,100,1)] transform -translate-y-0.5' : 'bg-white text-black border-gray-300 hover:bg-gray-50'}`}
+                                onClick={() => setTargetTeamId(String(t.team_id))}
+                                className={`text-sm font-bold py-3 px-2 rounded-xl border-2 transition-all ${String(targetTeamId) === String(t.team_id) ? 'bg-black text-white border-black shadow-[2px_2px_0px_0px_rgba(100,100,100,1)] transform -translate-y-0.5' : 'bg-white text-black border-gray-300 hover:bg-gray-50'}`}
                             >
                                 {t.team_name}
                             </button>
                         ))}
                     </div>
                     <button 
-                      disabled={actionLoading || data.my_team.gloves <= 0 || !isLeader || !targetTeam || isGloveOnCooldown}
-                      onClick={() => handleAction('USE_GLOVE', undefined, targetTeam)}
+                      disabled={actionLoading || data.my_team.gloves <= 0 || !isLeader || !targetTeamId || isGloveOnCooldown}
+                      onClick={handleStartAttack}
                       className="w-full mt-2 bg-red-500 text-white border-2 border-black font-black py-3 rounded-xl hover:bg-red-600 disabled:opacity-50 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none transition-all"
                     >
-                      {isGloveOnCooldown ? `冷卻中 ${gloveCooldownLabel}` : targetTeam ? `確認偷竊 ${targetTeam}！` : "請先選擇目標"}
+                      {isGloveOnCooldown ? `冷卻中 ${gloveCooldownLabel}` : targetTeamId ? `開始集氣攻擊 ${otherTeams5.find(t => String(t.team_id) === String(targetTeamId))?.team_name || ""}` : "請先選擇目標"}
                     </button>
                 </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Charge Modal */}
+      {isChargeOpen && attackWindowEndDate && (
+        <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white border-4 border-black p-6 rounded-3xl max-w-sm w-full shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+            <h3 className="text-2xl font-black mb-2">全隊同步集氣</h3>
+            <p className="text-sm font-bold text-gray-600 mb-3">目標：{currentTargetName}</p>
+            <div className="w-full h-3 bg-gray-200 border-2 border-black rounded-full overflow-hidden mb-3">
+              <div
+                className="h-full bg-red-500 transition-all"
+                style={{ width: `${attackProgressPercent}%` }}
+              />
+            </div>
+            <div className="text-4xl font-black text-center mb-4">{attackRemainingSec}s</div>
+            <button
+              onClick={handleChargeClick}
+              disabled={!isAttackActive}
+              className="w-full h-32 bg-yellow-400 border-4 border-black rounded-2xl font-black text-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-y-1 active:shadow-none disabled:opacity-50"
+            >
+              狂點集氣
+            </button>
+            <div className="mt-4 text-center">
+              <div className="text-xl font-black">Combo：{chargeClicks}</div>
+              <div className="text-xs font-bold text-gray-500 mt-1">
+                {isLeader ? "指揮中…" : "自動上傳中…"}
+              </div>
+            </div>
           </div>
         </div>
       )}

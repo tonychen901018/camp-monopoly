@@ -6,6 +6,7 @@ export interface PlayerData {
 }
 
 export interface MyTeamData {
+  team_id?: string;
   money: number;
   exp: number; // 新增經驗值
   has_egg: boolean;
