@@ -12,6 +12,7 @@ export interface MyTeamData {
   gloves: number;
   shields: number;
   shield_expiry: string;
+  glove_cooldown_until?: string;
   is_shield_active: boolean;
 }
 

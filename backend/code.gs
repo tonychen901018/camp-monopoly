@@ -238,6 +238,10 @@ function doPost(e) {
         if (targetHasEgg) {
           teamSheet.getRange(targetIndex + 1, colHasEgg + 1).setValue(false);
           teamSheet.getRange(myTeamIndex + 1, colHasEgg + 1).setValue(true);
+          // 金蛋被偷走時，若目標隊伍有防護罩效果，也要一併失效（避免沒金蛋還持續開盾）
+          if (colShieldExpiry !== -1) {
+            teamSheet.getRange(targetIndex + 1, colShieldExpiry + 1).setValue("");
+          }
           resultMessage = "💰 偷竊大成功！你偷到了傳說中的金蛋！快逃啊！";
           logToSheet(ss, student.team_name, "STEAL_EGG", detailLog, "SUCCESS_GOT_EGG");
         } else {
@@ -362,6 +366,7 @@ function buildDashboard_(ss, studentId, actionResultOrNull) {
       gloves: Number(myTeam.gloves || 0),
       shields: Number(myTeam.shields || 0),
       shield_expiry: myTeam.shield_expiry || "",
+      glove_cooldown_until: myTeam.glove_cooldown_until || "",
       is_shield_active: isShieldActive
     },
     other_teams: otherTeams,
@@ -399,6 +404,13 @@ function runAction_(ss, actionType, params, studentId) {
   const colShields = headers.indexOf("shields");
   const colShieldExpiry = headers.indexOf("shield_expiry");
   const colHasEgg = headers.indexOf("has_egg");
+  // 黑手套冷卻系統（Teams 表需新增以下欄位）
+  // - glove_window_start: ISO string（5 分鐘視窗起點）
+  // - glove_window_count: number（視窗內已使用次數）
+  // - glove_cooldown_until: ISO string（冷卻結束時間）
+  const colGloveWindowStart = headers.indexOf("glove_window_start");
+  const colGloveWindowCount = headers.indexOf("glove_window_count");
+  const colGloveCooldownUntil = headers.indexOf("glove_cooldown_until");
 
   // 找我方隊伍
   let myTeamIndex = -1;
@@ -459,6 +471,46 @@ function runAction_(ss, actionType, params, studentId) {
     if (!targetTeamName) throw new Error("未指定偷竊目標");
     if (targetTeamName === String(student.team_name)) throw new Error("不能偷自己！");
 
+    // --- 黑手套 CD 規則 ---
+    // 5 分鐘內使用第 3 次後，進入 20 分鐘冷卻（第三次仍允許出手）
+    if (colGloveWindowStart === -1 || colGloveWindowCount === -1 || colGloveCooldownUntil === -1) {
+      throw new Error("缺少冷卻欄位：請在 Teams 新增 glove_window_start / glove_window_count / glove_cooldown_until");
+    }
+
+    const now = new Date();
+    const cooldownRaw = teamData[myTeamIndex][colGloveCooldownUntil];
+    if (cooldownRaw) {
+      const cooldownUntil = new Date(cooldownRaw);
+      if (cooldownUntil > now) {
+        const remainingMs = cooldownUntil.getTime() - now.getTime();
+        const remainingSec = Math.ceil(remainingMs / 1000);
+        const mm = Math.floor(remainingSec / 60);
+        const ss2 = remainingSec % 60;
+        throw new Error(`黑手套冷卻中：${mm}:${String(ss2).padStart(2, "0")}`);
+      }
+    }
+
+    const windowStartRaw = teamData[myTeamIndex][colGloveWindowStart];
+    const windowCountRaw = teamData[myTeamIndex][colGloveWindowCount];
+    const windowStart = windowStartRaw ? new Date(windowStartRaw) : null;
+    const windowCount = Math.max(0, Math.floor(Number(windowCountRaw || 0)));
+    const within5Min = windowStart ? (now.getTime() - windowStart.getTime() <= 5 * 60 * 1000) : false;
+
+    let nextWindowStart = within5Min ? windowStart : now;
+    let nextCount = within5Min ? windowCount + 1 : 1;
+
+    // 先寫回視窗統計
+    teamSheet.getRange(myTeamIndex + 1, colGloveWindowStart + 1).setValue(nextWindowStart.toISOString());
+    teamSheet.getRange(myTeamIndex + 1, colGloveWindowCount + 1).setValue(nextCount);
+
+    if (nextCount >= 3) {
+      const cdUntil = new Date(now.getTime() + 20 * 60 * 1000);
+      teamSheet.getRange(myTeamIndex + 1, colGloveCooldownUntil + 1).setValue(cdUntil.toISOString());
+      // 重置視窗，避免冷卻結束後立刻因舊數據觸發
+      teamSheet.getRange(myTeamIndex + 1, colGloveWindowStart + 1).setValue("");
+      teamSheet.getRange(myTeamIndex + 1, colGloveWindowCount + 1).setValue(0);
+    }
+
     // 扣道具（不論成功與否都消耗）
     teamSheet.getRange(myTeamIndex + 1, colGloves + 1).setValue(currentGloves - 1);
 
@@ -490,6 +542,10 @@ function runAction_(ss, actionType, params, studentId) {
       if (targetHasEgg) {
         teamSheet.getRange(targetIndex + 1, colHasEgg + 1).setValue(false);
         teamSheet.getRange(myTeamIndex + 1, colHasEgg + 1).setValue(true);
+        // 金蛋被偷走時，若目標隊伍有防護罩效果，也要一併失效（避免沒金蛋還持續開盾）
+        if (colShieldExpiry !== -1) {
+          teamSheet.getRange(targetIndex + 1, colShieldExpiry + 1).setValue("");
+        }
         logToSheet(ss, student.team_name, "STEAL_EGG", detailLog, "SUCCESS_GOT_EGG");
         return { type: "USE_GLOVE", ok: true, message: `成功偷到金蛋！目標：${targetTeamName}` };
       }

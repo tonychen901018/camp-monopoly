@@ -3,7 +3,7 @@ import { Coins, Info, MapPin, Trophy, X, ShoppingBag, Shield, Hand, Egg, Star, L
 import type { ApiResponse, AchievementData, ShopItem } from './types';
 
 // ★★★ 請確認此處網址為最新部署版本 ★★★
-const API_URL = "https://script.google.com/macros/s/AKfycbwenfaDlom3JrroDlX0xC0RQ95BORtR2SZ2c1P3l85LmZys5Ksxax4FwpIVn1NmJkMEmg/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbyYscR_MoZbrq6Qmu1zAuu377-yRSr2Lzsj5gwODq9PHskLzLquMvdYDwsXuER5lN2ROg/exec";
 
 // 自動更新間隔 (毫秒)
 // 行動改為「同一個 response 回傳最新 dashboard」後，可以降低輪詢頻率
@@ -33,6 +33,7 @@ function App() {
   const [shopQtyByItemId, setShopQtyByItemId] = useState<Record<string, number>>({});
   
   const [targetTeam, setTargetTeam] = useState<string>('');
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
   
   // 修改：控制道具彈窗狀態 (取代展開)
   const [activeItemModal, setActiveItemModal] = useState<null | 'shield' | 'glove'>(null);
@@ -251,6 +252,12 @@ function App() {
     };
   }, [isLoggedIn, data?.player?.id]);
 
+  // 倒數計時用（黑手套冷卻顯示）
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
 
   const closeAllModals = () => {
     setSelectedAchievement(null);
@@ -293,6 +300,17 @@ function App() {
 
   const isShieldActive = Boolean(data.my_team.is_shield_active);
   const shieldUntil = data.my_team.shield_expiry ? new Date(data.my_team.shield_expiry) : null;
+  const gloveCooldownUntil = data.my_team.glove_cooldown_until ? new Date(data.my_team.glove_cooldown_until) : null;
+  const gloveCooldownRemainingMs = gloveCooldownUntil ? gloveCooldownUntil.getTime() - nowTick : 0;
+  const isGloveOnCooldown = gloveCooldownRemainingMs > 0;
+  const gloveCooldownLabel = isGloveOnCooldown
+    ? (() => {
+        const s = Math.ceil(gloveCooldownRemainingMs / 1000);
+        const mm = Math.floor(s / 60);
+        const ss = s % 60;
+        return `${mm}:${String(ss).padStart(2, '0')}`;
+      })()
+    : '';
   // 前5個隊伍 (排除自己) 用於偷竊列表
   const otherTeams5 = (data.other_teams || []).slice(0, 5);
 
@@ -393,8 +411,24 @@ function App() {
           
           <div className="grid grid-cols-2 gap-4">
             {/* 防護罩卡片 */}
-            <div className={`doodle-card p-3 rounded-2xl relative transition-all duration-300 ${data?.my_team && data.my_team.shields > 0 ? 'bg-blue-50 hover:bg-blue-100 cursor-pointer' : 'bg-gray-100 opacity-80'}`}
-                 onClick={() => data?.my_team && data.my_team.shields > 0 && setActiveItemModal('shield')}>
+            <div
+              className={`doodle-card p-3 rounded-2xl relative transition-all duration-300 ${
+                data?.my_team && data.my_team.shields > 0 ? 'bg-blue-50 hover:bg-blue-100 cursor-pointer' : 'bg-gray-100 opacity-80 cursor-pointer'
+              }`}
+              onClick={() => {
+                if (data?.my_team && data.my_team.shields > 0) {
+                  setActiveItemModal('shield');
+                  return;
+                }
+                setIsShopOpen(true);
+                setResultModal({
+                  isOpen: true,
+                  type: 'error',
+                  title: '沒有防護罩',
+                  message: '你目前沒有防護罩，已為你打開道具商店。'
+                });
+              }}
+            >
                <div className="flex justify-between items-start">
                  <div>
                    <h4 className="font-black text-lg flex items-center gap-1 text-blue-900">
@@ -408,8 +442,33 @@ function App() {
             </div>
 
             {/* 黑手套卡片 */}
-            <div className={`doodle-card p-3 rounded-2xl relative transition-all duration-300 ${data?.my_team && data.my_team.gloves > 0 ? 'bg-red-50 hover:bg-red-100 cursor-pointer' : 'bg-gray-100 opacity-80'}`}
-                 onClick={() => data?.my_team && data.my_team.gloves > 0 && setActiveItemModal('glove')}>
+            <div
+              className={`doodle-card p-3 rounded-2xl relative transition-all duration-300 ${
+                data?.my_team && data.my_team.gloves > 0 ? 'bg-red-50 hover:bg-red-100 cursor-pointer' : 'bg-gray-100 opacity-80 cursor-pointer'
+              }`}
+              onClick={() => {
+                if (data?.my_team && data.my_team.gloves > 0) {
+                  if (isGloveOnCooldown) {
+                    setResultModal({
+                      isOpen: true,
+                      type: 'error',
+                      title: '黑手套冷卻中',
+                      message: `請等待 ${gloveCooldownLabel} 後再使用。`
+                    });
+                    return;
+                  }
+                  setActiveItemModal('glove');
+                  return;
+                }
+                setIsShopOpen(true);
+                setResultModal({
+                  isOpen: true,
+                  type: 'error',
+                  title: '沒有黑手套',
+                  message: '你目前沒有黑手套，已為你打開道具商店。'
+                });
+              }}
+            >
                <div className="flex justify-between items-start">
                  <div>
                    <h4 className="font-black text-lg flex items-center gap-1 text-red-900">
@@ -420,6 +479,11 @@ function App() {
                  </div>
                </div>
                <p className="text-[10px] font-bold text-gray-500 mt-2">點擊偷竊...</p>
+               {isGloveOnCooldown && (
+                 <div className="mt-2 text-[10px] font-black text-red-700 bg-red-100 border-2 border-red-300 rounded-lg px-2 py-1 inline-block">
+                   冷卻中：{gloveCooldownLabel}
+                 </div>
+               )}
             </div>
           </div>
         </div>
@@ -500,6 +564,11 @@ function App() {
                     <p className="text-md font-bold text-gray-600 bg-red-50 p-3 rounded-xl border-2 border-red-200">
                         偷竊成功率 60%，若對方有防護罩則降為 30%。成功可獲得對方金蛋！
                     </p>
+                    {isGloveOnCooldown && (
+                      <div className="bg-red-100 border-2 border-red-400 text-red-800 font-black p-3 rounded-xl">
+                        黑手套冷卻中：{gloveCooldownLabel}
+                      </div>
+                    )}
                     <p className="text-sm font-black text-gray-800 mb-2">選擇目標隊伍：</p>
                     <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
                         {otherTeams5.map((t) => (
@@ -513,11 +582,11 @@ function App() {
                         ))}
                     </div>
                     <button 
-                      disabled={actionLoading || data.my_team.gloves <= 0 || !isLeader || !targetTeam}
+                      disabled={actionLoading || data.my_team.gloves <= 0 || !isLeader || !targetTeam || isGloveOnCooldown}
                       onClick={() => handleAction('USE_GLOVE', undefined, targetTeam)}
                       className="w-full mt-2 bg-red-500 text-white border-2 border-black font-black py-3 rounded-xl hover:bg-red-600 disabled:opacity-50 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none transition-all"
                     >
-                      {targetTeam ? `確認偷竊 ${targetTeam}！` : "請先選擇目標"}
+                      {isGloveOnCooldown ? `冷卻中 ${gloveCooldownLabel}` : targetTeam ? `確認偷竊 ${targetTeam}！` : "請先選擇目標"}
                     </button>
                 </div>
             )}
