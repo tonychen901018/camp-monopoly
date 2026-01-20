@@ -33,6 +33,7 @@ const CACHE_TTL = {
 const ATTACK_WINDOW_MS = 20 * 1000;
 const ATTACK_STATUS_CACHE_TTL = 120; // seconds
 const ATTACK_CLICKS_CACHE_TTL = 600; // seconds
+const ATTACK_RESULT_CACHE_TTL = 120; // seconds
 
 function getCachedJson_(key, loaderFn, ttlSeconds) {
   const cache = CacheService.getScriptCache();
@@ -55,6 +56,10 @@ function getAttackStatusCacheKey_(teamId) {
 
 function getAttackClicksCacheKey_(teamId) {
   return `cache:atk_clicks:${teamId}`;
+}
+
+function getAttackResultCacheKey_(teamId) {
+  return `cache:atk_result:${teamId}`;
 }
 
 function readAttackStatusFromSheet_(ss, teamId) {
@@ -104,6 +109,18 @@ function checkAttackStatusFast_(ss, teamId) {
     cache.put(key, JSON.stringify(status), ATTACK_STATUS_CACHE_TTL);
   }
   return status;
+}
+
+function checkAttackResultFast_(teamId) {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(getAttackResultCacheKey_(teamId));
+  if (!cached) return { success: true, result: null };
+  try {
+    return { success: true, result: JSON.parse(cached) };
+  } catch (e) {
+    cache.remove(getAttackResultCacheKey_(teamId));
+    return { success: true, result: null };
+  }
 }
 
 function submitClicksFast_(ss, teamId, clicksRaw) {
@@ -196,6 +213,11 @@ function doGet(e) {
         if (!teamId) throw new Error("Missing team_id");
         const ss = SpreadsheetApp.getActiveSpreadsheet();
         return jsonResponse_(checkAttackStatusFast_(ss, teamId));
+      }
+      if (actionType === "CHECK_ATTACK_RESULT") {
+        const teamId = String(params.team_id || "").trim();
+        if (!teamId) throw new Error("Missing team_id");
+        return jsonResponse_(checkAttackResultFast_(teamId));
       }
       if (actionType === "SUBMIT_CLICKS") {
         const teamId = String(params.team_id || "").trim();
@@ -602,12 +624,19 @@ function handleTeamAttackAction_(ss, actionType, params) {
       teamSheet.getRange(attackerIdx + 1, colCurrentTargetId + 1).setValue("");
       teamSheet.getRange(attackerIdx + 1, colTempClicks + 1).setValue(0);
 
-      // 清理 cache
+      // 清理 cache（狀態/點擊），並寫入結果快取供隊員讀取
+      const resultPayload = {
+        result_id: String(new Date().getTime()),
+        stolen: stolen,
+        message: message,
+        total_clicks: totalClicks
+      };
+      cache.put(getAttackResultCacheKey_(attackerTeamId), JSON.stringify(resultPayload), ATTACK_RESULT_CACHE_TTL);
       cache.remove(getAttackStatusCacheKey_(attackerTeamId));
       cache.remove(getAttackClicksCacheKey_(attackerTeamId));
 
       lock.releaseLock();
-      return { success: true, stolen: stolen, message: message, total_clicks: totalClicks };
+      return { success: true, stolen: stolen, message: message, total_clicks: totalClicks, result_id: resultPayload.result_id };
     }
 
     lock.releaseLock();

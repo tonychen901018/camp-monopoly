@@ -3,7 +3,7 @@ import { Coins, Info, MapPin, Trophy, X, ShoppingBag, Shield, Hand, Egg, Star, L
 import type { ApiResponse, AchievementData, ShopItem } from './types';
 
 // ★★★ 請確認此處網址為最新部署版本 ★★★
-const API_URL = "https://script.google.com/macros/s/AKfycbxdW0m3Jga74QyYcUhXX9GIJXcNYILFMU42OkSTdo-hDIcSWy7w_Be6uXQYuV9p9pcqig/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbxoD3LyjhGLX4Nr6lJDYEoMiBtL9iDJOg5hKBxG7KkE1QK0vA330RV6mvEbVgjnCK4R7Q/exec";
 
 // 自動更新間隔 (毫秒)
 // 行動改為「同一個 response 回傳最新 dashboard」後，可以降低輪詢頻率
@@ -38,6 +38,7 @@ function App() {
   const [chargeClicks, setChargeClicks] = useState(0);
   const [chargeWindowEnd, setChargeWindowEnd] = useState<string>('');
   const [chargeTargetId, setChargeTargetId] = useState<string>('');
+  const [lastAttackResultId, setLastAttackResultId] = useState<string>('');
   
   // 修改：控制道具彈窗狀態 (取代展開)
   const [activeItemModal, setActiveItemModal] = useState<null | 'shield' | 'glove'>(null);
@@ -179,6 +180,17 @@ function App() {
     qs.set('action', 'SUBMIT_CLICKS');
     qs.set('team_id', teamId);
     qs.set('clicks', String(clicks));
+    qs.set('student_id', data.player.id);
+    qs.set('t', String(Date.now()));
+    const res = await fetch(`${API_URL}?${qs.toString()}`);
+    return res.json();
+  };
+
+  const checkAttackResult = async (teamId: string) => {
+    if (!data?.player?.id) return { success: false };
+    const qs = new URLSearchParams();
+    qs.set('action', 'CHECK_ATTACK_RESULT');
+    qs.set('team_id', teamId);
     qs.set('student_id', data.player.id);
     qs.set('t', String(Date.now()));
     const res = await fetch(`${API_URL}?${qs.toString()}`);
@@ -345,7 +357,7 @@ function App() {
       } catch (err) {
         console.error(err);
       }
-    }, 3000);
+    }, 2000);
     return () => window.clearInterval(timer);
   }, [isLoggedIn, data?.my_team?.team_id, isLeader]);
 
@@ -358,7 +370,7 @@ function App() {
     }
     chargeSubmitTimerRef.current = window.setInterval(() => {
       void submitPendingClicks(teamId);
-    }, 5000);
+    }, 2000);
     return () => {
       if (chargeSubmitTimerRef.current) {
         window.clearInterval(chargeSubmitTimerRef.current);
@@ -373,7 +385,7 @@ function App() {
     if (!isLeader || !data?.my_team?.team_id || !chargeWindowEnd) return;
     const teamId = data.my_team.team_id;
     const windowEnd = new Date(chargeWindowEnd);
-    const delayMs = Math.max(0, windowEnd.getTime() - Date.now() + 2000);
+    const delayMs = Math.max(0, windowEnd.getTime() - Date.now() + 1000);
     if (finalizeTimerRef.current) return;
     finalizeTimerRef.current = window.setTimeout(async () => {
       await submitPendingClicks(teamId);
@@ -392,6 +404,7 @@ function App() {
           message: json?.message || '未知錯誤'
         });
       } else {
+        if (json?.result_id) setLastAttackResultId(String(json.result_id));
         setResultModal({
           isOpen: true,
           type: json.stolen ? 'success' : 'error',
@@ -414,6 +427,30 @@ function App() {
       }
     };
   }, [chargeWindowEnd, isLeader, data?.my_team?.team_id, data?.player?.id]);
+
+  // 一般隊員：輪詢結果，結束後顯示彈窗
+  useEffect(() => {
+    if (!isLoggedIn || !data?.my_team?.team_id || isLeader) return;
+    const teamId = data.my_team.team_id;
+    const timer = window.setInterval(async () => {
+      try {
+        const json = await checkAttackResult(teamId);
+        const result = json?.result;
+        if (!result?.result_id) return;
+        if (String(result.result_id) === lastAttackResultId) return;
+        setLastAttackResultId(String(result.result_id));
+        setResultModal({
+          isOpen: true,
+          type: result.stolen ? 'success' : 'error',
+          title: result.stolen ? '偷竊成功' : '偷竊失敗',
+          message: result.message || (result.stolen ? '成功奪回金蛋' : '未能偷到金蛋')
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [isLoggedIn, data?.my_team?.team_id, isLeader, lastAttackResultId]);
 
   // 開啟新一輪集氣時重置
   useEffect(() => {
