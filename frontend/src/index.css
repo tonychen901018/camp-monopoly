@@ -1,9 +1,9 @@
+/* 引入手寫字體 */
+@import url('https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Maru+Gothic:wght@500;700;900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* 引入手寫字體 */
-@import url('https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Maru+Gothic:wght@500;700;900&display=swap');
 
 @layer base {
   body {
