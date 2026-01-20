@@ -350,9 +350,13 @@ function App() {
           setChargeTargetId(targetId);
           setIsChargeOpen(true);
         } else {
-          setChargeWindowEnd("");
-          setChargeTargetId("");
-          setIsChargeOpen(false);
+          // 隊員：窗口結束就關閉
+          // 隊長：保留結束時間與目標，讓結算流程能跑完
+          if (!isLeader) {
+            setChargeWindowEnd("");
+            setChargeTargetId("");
+            setIsChargeOpen(false);
+          }
         }
       } catch (err) {
         console.error(err);
