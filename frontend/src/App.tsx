@@ -321,7 +321,7 @@ function App() {
       {data.my_team.has_egg && (
         <div className="fixed top-0 left-0 w-full bg-yellow-400 border-b-4 border-black z-50 py-2 px-4 shadow-lg animate-pulse flex items-center justify-center gap-2">
           <Egg className="animate-bounce" size={24} strokeWidth={3} />
-          <span className="font-black text-lg">警告：你的隊伍持有金蛋！快開啟防護罩！</span>
+          <span className="font-black text-[13px] sm:text-lg whitespace-nowrap">你的隊伍有金蛋，快開啟防護罩</span>
         </div>
       )}
 
@@ -435,10 +435,9 @@ function App() {
                      <Shield className={data?.my_team && data.my_team.shields > 0 ? "fill-blue-400 text-blue-900" : "text-gray-400"} size={20} />
                      防護罩
                    </h4>
-                   <p className="text-sm font-bold text-gray-600 mt-1">x {data?.my_team?.shields}</p>
+                  <p className="text-lg font-black text-gray-700 mt-1">x {data?.my_team?.shields}</p>
                  </div>
                </div>
-               <p className="text-[10px] font-bold text-gray-500 mt-2">點擊使用...</p>
             </div>
 
             {/* 黑手套卡片 */}
@@ -473,12 +472,11 @@ function App() {
                  <div>
                    <h4 className="font-black text-lg flex items-center gap-1 text-red-900">
                      <Hand className={data?.my_team && data.my_team.gloves > 0 ? "fill-red-400 text-red-900" : "text-gray-400"} size={20} />
-                     看不見的黑手套
+                     黑手套
                    </h4>
-                   <p className="text-sm font-bold text-gray-600 mt-1">x {data?.my_team?.gloves}</p>
+                  <p className="text-lg font-black text-gray-700 mt-1">x {data?.my_team?.gloves}</p>
                  </div>
                </div>
-               <p className="text-[10px] font-bold text-gray-500 mt-2">點擊偷竊...</p>
                {isGloveOnCooldown && (
                  <div className="mt-2 text-[10px] font-black text-red-700 bg-red-100 border-2 border-red-300 rounded-lg px-2 py-1 inline-block">
                    冷卻中：{gloveCooldownLabel}
@@ -505,7 +503,13 @@ function App() {
             {data.global?.achievements?.map((ach) => (
               <button 
                 key={ach.id} 
-                onClick={() => setSelectedAchievement(ach)}
+                onClick={() =>
+                  setSelectedAchievement({
+                    ...ach,
+                    title: ach.title && ach.title !== "????" ? ach.title : "未解鎖成就",
+                    description: ach.description && ach.description !== "????" ? ach.description : "完成條件尚未公開"
+                  })
+                }
                 className={`w-16 h-16 rounded-full border-4 border-black flex items-center justify-center shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] active:translate-y-1 active:shadow-none transition-all ${ach.is_unlocked ? 'bg-yellow-400' : 'bg-gray-200'}`}
               >
                 {ach.is_unlocked ? <Trophy strokeWidth={3} className="text-white drop-shadow-md" /> : <span className="font-black text-gray-400">?</span>}
@@ -637,7 +641,12 @@ function App() {
             )}
 
             <div className="grid grid-cols-2 gap-4">
-              {data.shop_items?.map((item: ShopItem) => (
+              {(() => {
+                const shopItems = [...(data.shop_items || [])].sort((a, b) => {
+                  const order: Record<string, number> = { shield: 0, glove: 1 };
+                  return (order[a.item_id] ?? 99) - (order[b.item_id] ?? 99);
+                });
+                return shopItems.map((item: ShopItem) => (
                 <div key={item.item_id} className="bg-white border-4 border-black p-3 rounded-xl shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)] flex flex-col justify-between hover:-translate-y-1 transition-transform h-full">
                   <div>
                     <div className="flex justify-between items-start mb-2">
@@ -660,9 +669,9 @@ function App() {
 
                     return (
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between gap-2">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                           <span className="text-xs font-black text-gray-500">數量</span>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1">
                             <button
                               type="button"
                               aria-label="減少購買數量"
@@ -673,11 +682,11 @@ function App() {
                                   return { ...prev, [item.item_id]: nextQty };
                                 });
                               }}
-                              className="w-9 h-9 bg-white border-2 border-black rounded-lg font-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none"
+                              className="w-8 h-8 bg-white border-2 border-black rounded-md font-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none"
                             >
                               -
                             </button>
-                            <div className="min-w-10 text-center font-black text-lg">{safeQty}</div>
+                            <div className="min-w-8 text-center font-black text-base">{safeQty}</div>
                             <button
                               type="button"
                               aria-label="增加購買數量"
@@ -688,7 +697,7 @@ function App() {
                                   return { ...prev, [item.item_id]: nextQty };
                                 });
                               }}
-                              className="w-9 h-9 bg-white border-2 border-black rounded-lg font-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none"
+                              className="w-8 h-8 bg-white border-2 border-black rounded-md font-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5 active:shadow-none"
                             >
                               +
                             </button>
@@ -714,7 +723,8 @@ function App() {
                     );
                   })()}
                 </div>
-              ))}
+              ));
+              })()}
             </div>
           </div>
         </div>
