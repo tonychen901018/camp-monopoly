@@ -1,15 +1,28 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Coins, Info, MapPin, Trophy, X, ShoppingBag, Shield, Hand, Egg, Star, Lock, CheckCircle, XCircle } from 'lucide-react';
+import { Coins, Info, MapPin, Trophy, X, ShoppingBag, Shield, Hand, Egg, Star, Lock, CheckCircle, XCircle, Anchor, Martini, Dumbbell, Wand2, Music, Gem } from 'lucide-react';
 import type { ApiResponse, AchievementData, ShopItem } from './types';
 
 // ★★★ 請確認此處網址為最新部署版本 ★★★
-const API_URL = "https://script.google.com/macros/s/AKfycbxoD3LyjhGLX4Nr6lJDYEoMiBtL9iDJOg5hKBxG7KkE1QK0vA330RV6mvEbVgjnCK4R7Q/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbx8NLOCF_1rGKeAc78TNDJ_sKe4JgeP40quv0CY7W9VVLBBg_V6DjtbdTxnFhqBgpUumQ/exec";
 
 // 自動更新間隔 (毫秒)
 // 行動改為「同一個 response 回傳最新 dashboard」後，可以降低輪詢頻率
 const POLLING_INTERVAL = 10000;
 const LS_ID_KEY = 'camp_student_id';
 const LS_CACHE_PREFIX = 'camp_dashboard_cache_v1:'; // + studentId
+
+// 預先載入所有地圖圖片
+const mapImages = import.meta.glob('./assets/*.png', { eager: true, import: 'default' }) as Record<string, string>;
+
+const getTeamIcon = (teamName: string) => {
+  if (teamName.includes('派瑞特')) return <Anchor size={20} strokeWidth={3} />;
+  if (teamName.includes('莫吉托')) return <Martini size={20} strokeWidth={3} />;
+  if (teamName.includes('海格力士')) return <Dumbbell size={20} strokeWidth={3} />;
+  if (teamName.includes('魔卡洛斯')) return <Wand2 size={20} strokeWidth={3} />;
+  if (teamName.includes('柴可夫')) return <Music size={20} strokeWidth={3} />;
+  if (teamName.includes('梅林')) return <Gem size={20} strokeWidth={3} />;
+  return <Shield size={20} strokeWidth={3} />;
+};
 
 function App() {
   const [inputId, setInputId] = useState('');
@@ -628,6 +641,7 @@ function App() {
         <div className={`doodle-card p-5 rounded-3xl -rotate-1 relative transition-colors duration-300 ${data.my_team.has_egg ? 'bg-yellow-300 ring-4 ring-yellow-500 ring-offset-4' : 'bg-[#4ECDC4]'}`}>
           <div className="flex flex-col mb-4">
             <h2 className="text-3xl font-black flex items-center gap-2 flex-wrap text-white drop-shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+              {getTeamIcon(data.player.team)}
               {data.player.team}
               {isShieldActive && (
                  <span className="text-sm bg-blue-600 text-white px-2 py-1 rounded-full border-2 border-white animate-pulse shadow-sm flex items-center gap-1">
@@ -765,34 +779,64 @@ function App() {
         </div>
 
         {/* 3. 戰況 */}
-        <div className="doodle-card p-5 rounded-3xl bg-white relative">
-          <div className="flex items-center gap-2 mb-4">
-            <MapPin size={24} strokeWidth={3} />
-            <h3 className="text-xl font-black">目前戰況</h3>
-          </div>
+        <div className="doodle-card p-5 rounded-3xl bg-white relative overflow-hidden">
+          {data.global?.location?.id && mapImages[`./assets/${data.global.location.id}.png`] && (
+            <div className="absolute inset-0 z-0">
+               <img 
+                  src={mapImages[`./assets/${data.global.location.id}.png`]} 
+                  alt="" 
+                  className="w-full h-full object-cover opacity-50"
+                />
+            </div>
+          )}
+          
+          <div className="relative z-10">
+            <div className="flex items-center gap-2 mb-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-xl w-fit border-2 border-black/10 shadow-sm">
+              <MapPin size={20} strokeWidth={3} />
+              <h3 className="text-lg font-black">目前戰況</h3>
+            </div>
 
-          <button onClick={() => setIsLocationModalOpen(true)} className="w-full mb-6 bg-gray-100 p-4 border-4 border-black rounded-2xl hover:bg-gray-200 transition-all text-left relative active:scale-[0.98]">
-            <div className="absolute top-2 right-2"><Info size={16}/></div>
-            <span className="text-xs font-bold text-gray-500">LOCATION</span>
-            <span className="text-2xl font-black block">{data.global?.location?.name || "未知領域"}</span>
-          </button>
+            <button onClick={() => setIsLocationModalOpen(true)} className="w-full mb-6 bg-white/90 backdrop-blur-sm p-4 border-4 border-black rounded-2xl hover:bg-white transition-all text-left relative active:scale-[0.98] flex items-center gap-4">
+              <div className="w-16 h-16 bg-white rounded-xl border-2 border-black overflow-hidden flex-shrink-0 shadow-sm">
+                {data.global?.location?.id && mapImages[`./assets/${data.global.location.id}.png`] ? (
+                  <img 
+                    src={mapImages[`./assets/${data.global.location.id}.png`]} 
+                    alt="Location" 
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-gray-400 font-bold bg-gray-200">
+                    <MapPin size={24} />
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex-1 min-w-0">
+                 <div className="flex justify-between items-start">
+                   <span className="text-xs font-bold text-gray-500">LOCATION</span>
+                   <Info size={16} className="text-gray-400"/>
+                 </div>
+                 <span className="text-2xl font-black block truncate">{data.global?.location?.name || "未知領域"}</span>
+              </div>
+            </button>
 
-          <div className="flex justify-center gap-4">
-            {data.global?.achievements?.map((ach) => (
-              <button 
-                key={ach.id} 
-                onClick={() =>
-                  setSelectedAchievement({
-                    ...ach,
-                    title: ach.title && ach.title !== "????" ? ach.title : "未解鎖成就",
-                    description: ach.description && ach.description !== "????" ? ach.description : "完成條件尚未公開"
-                  })
-                }
-                className={`w-16 h-16 rounded-full border-4 border-black flex items-center justify-center shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] active:translate-y-1 active:shadow-none transition-all ${ach.is_unlocked ? 'bg-yellow-400' : 'bg-gray-200'}`}
-              >
-                {ach.is_unlocked ? <Trophy strokeWidth={3} className="text-white drop-shadow-md" /> : <span className="font-black text-gray-400">?</span>}
-              </button>
-            ))}
+            <div className="flex justify-center gap-4">
+              {data.global?.achievements?.map((ach) => (
+                <button 
+                  key={ach.id} 
+                  onClick={() =>
+                    setSelectedAchievement({
+                      ...ach,
+                      title: ach.title && ach.title !== "????" ? ach.title : "未解鎖成就",
+                      description: ach.description && ach.description !== "????" ? ach.description : "完成條件尚未公開"
+                    })
+                  }
+                  className={`w-16 h-16 rounded-full border-4 border-black flex items-center justify-center shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] active:translate-y-1 active:shadow-none transition-all ${ach.is_unlocked ? 'bg-yellow-400' : 'bg-gray-200'}`}
+                >
+                  {ach.is_unlocked ? <Trophy strokeWidth={3} className="text-white drop-shadow-md" /> : <span className="font-black text-gray-400">?</span>}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -857,9 +901,14 @@ function App() {
                             <button
                                 key={t.team_id}
                                 onClick={() => setTargetTeamId(String(t.team_id))}
-                                className={`text-sm font-bold py-3 px-2 rounded-xl border-2 transition-all ${String(targetTeamId) === String(t.team_id) ? 'bg-black text-white border-black shadow-[2px_2px_0px_0px_rgba(100,100,100,1)] transform -translate-y-0.5' : 'bg-white text-black border-gray-300 hover:bg-gray-50'}`}
+                                className={`p-2 rounded-xl border-2 font-bold text-left transition-all flex flex-col items-center gap-1 ${
+                                    String(targetTeamId) === String(t.team_id)
+                                    ? 'bg-black text-white border-black scale-[1.02] shadow-[2px_2px_0px_0px_rgba(100,100,100,1)] transform -translate-y-0.5' 
+                                    : 'bg-white text-black border-gray-300 hover:bg-gray-50'
+                                }`}
                             >
-                                {t.team_name}
+                                <span className="flex-shrink-0">{getTeamIcon(t.team_name)}</span>
+                                <span className="text-xs truncate">{t.team_name}</span>
                             </button>
                         ))}
                     </div>
