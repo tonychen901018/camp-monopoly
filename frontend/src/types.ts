@@ -30,6 +30,7 @@ export interface ShopItem {
 }
 
 export interface LocationData {
+  id?: string;
   name: string;
   description: string;
 }
