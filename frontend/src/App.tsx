@@ -12,6 +12,7 @@ const LS_ID_KEY = 'camp_student_id';
 const LS_CACHE_PREFIX = 'camp_dashboard_cache_v1:'; // + studentId
 
 // 預先載入所有地圖圖片
+// 確保路徑完全匹配，包含 ./ 前綴
 const mapImages = import.meta.glob('./assets/*.png', { eager: true, import: 'default' }) as Record<string, string>;
 
 const getTeamIcon = (teamName: string) => {
