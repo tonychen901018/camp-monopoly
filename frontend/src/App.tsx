@@ -3,7 +3,7 @@ import { Coins, Info, MapPin, Trophy, X, ShoppingBag, Shield, Hand, Egg, Star, L
 import type { ApiResponse, AchievementData, ShopItem } from './types';
 
 // ★★★ 請確認此處網址為最新部署版本 ★★★
-const API_URL = "https://script.google.com/macros/s/AKfycbx8NLOCF_1rGKeAc78TNDJ_sKe4JgeP40quv0CY7W9VVLBBg_V6DjtbdTxnFhqBgpUumQ/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbx42wdwyMGeZt1pdo08STruSREJ2pGtycIusKiDLhuHZMv1JaygGganfF8tEZyeXdNZ_Q/exec";
 
 // 自動更新間隔 (毫秒)
 // 行動改為「同一個 response 回傳最新 dashboard」後，可以降低輪詢頻率
@@ -27,6 +27,7 @@ const getTeamIcon = (teamName: string) => {
 
 function App() {
   const [inputId, setInputId] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,9 +69,12 @@ function App() {
   const chargeSubmitTimerRef = useRef<number | null>(null);
   const finalizeTimerRef = useRef<number | null>(null);
 
+  // 用於判斷是否已有記憶的 ID
+  const savedId = localStorage.getItem(LS_ID_KEY) || '';
+
   // --- API Calls ---
 
-  const fetchDashboardData = async (studentId: string, options?: { force?: boolean }) => {
+  const fetchDashboardData = async (studentId: string, pw: string, options?: { force?: boolean }) => {
     const trimmedId = studentId.trim();
     if (!trimmedId) return null;
 
@@ -83,9 +87,9 @@ function App() {
     fetchAbortRef.current = controller;
 
     try {
-      // 用 URLSearchParams 來自動 encode（避免 ID 含 # 時被當成 URL fragment 而沒送到後端）
       const qs = new URLSearchParams();
       qs.set('id', trimmedId);
+      qs.set('pw', pw);
       qs.set('t', String(Date.now()));
       const response = await fetch(`${API_URL}?${qs.toString()}`, { signal: controller.signal });
       const json = await response.json();
@@ -104,7 +108,7 @@ function App() {
   };
 
   const handleAction = async (action: 'BUY' | 'USE_SHIELD' | 'USE_GLOVE', itemId?: string, targetName?: string, qty?: number) => {
-    if (!data?.player?.id) return;
+    if (!data?.player?.id || !password) return;
 
     // 先跳彈窗（體感更快）
     setResultModal({
@@ -132,6 +136,7 @@ function App() {
       const qs = new URLSearchParams();
       qs.set('action', action);
       qs.set('student_id', data.player.id);
+      qs.set('pw', password);
       qs.set('t', String(timestamp));
       if (itemId) qs.set('item_id', itemId);
       if (targetName) qs.set('target_team_name', targetName);
@@ -178,57 +183,62 @@ function App() {
   };
 
   const checkAttackStatus = async (teamId: string) => {
-    if (!data?.player?.id) return { success: false };
+    if (!data?.player?.id || !password) return { success: false };
     const qs = new URLSearchParams();
     qs.set('action', 'CHECK_ATTACK_STATUS');
     qs.set('team_id', teamId);
     qs.set('student_id', data.player.id);
+    qs.set('pw', password);
     qs.set('t', String(Date.now()));
     const res = await fetch(`${API_URL}?${qs.toString()}`);
     return res.json();
   };
 
   const submitClicks = async (teamId: string, clicks: number) => {
-    if (!data?.player?.id) return { success: false };
+    if (!data?.player?.id || !password) return { success: false };
     const qs = new URLSearchParams();
     qs.set('action', 'SUBMIT_CLICKS');
     qs.set('team_id', teamId);
     qs.set('clicks', String(clicks));
     qs.set('student_id', data.player.id);
+    qs.set('pw', password);
     qs.set('t', String(Date.now()));
     const res = await fetch(`${API_URL}?${qs.toString()}`);
     return res.json();
   };
 
   const checkAttackResult = async (teamId: string) => {
-    if (!data?.player?.id) return { success: false };
+    if (!data?.player?.id || !password) return { success: false };
     const qs = new URLSearchParams();
     qs.set('action', 'CHECK_ATTACK_RESULT');
     qs.set('team_id', teamId);
     qs.set('student_id', data.player.id);
+    qs.set('pw', password);
     qs.set('t', String(Date.now()));
     const res = await fetch(`${API_URL}?${qs.toString()}`);
     return res.json();
   };
 
   const startAttack = async (attackerTeamId: string, targetTeamIdParam: string) => {
-    if (!data?.player?.id) return { success: false };
+    if (!data?.player?.id || !password) return { success: false };
     const qs = new URLSearchParams();
     qs.set('action', 'START_ATTACK');
     qs.set('attacker_team_id', attackerTeamId);
     qs.set('target_team_id', targetTeamIdParam);
     qs.set('student_id', data.player.id);
+    qs.set('pw', password);
     qs.set('t', String(Date.now()));
     const res = await fetch(`${API_URL}?${qs.toString()}`);
     return res.json();
   };
 
   const finalizeAttack = async (attackerTeamId: string) => {
-    if (!data?.player?.id) return { success: false };
+    if (!data?.player?.id || !password) return { success: false };
     const qs = new URLSearchParams();
     qs.set('action', 'FINALIZE_ATTACK');
     qs.set('attacker_team_id', attackerTeamId);
     qs.set('student_id', data.player.id);
+    qs.set('pw', password);
     qs.set('t', String(Date.now()));
     const res = await fetch(`${API_URL}?${qs.toString()}`);
     return res.json();
@@ -238,18 +248,22 @@ function App() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputId.trim()) return;
+    const targetId = savedId || inputId.trim();
+    if (!targetId || !password.trim()) {
+      setError("請輸入 ID 與密碼");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const json = await fetchDashboardData(inputId);
+      const json = await fetchDashboardData(targetId, password.trim());
       if (json && json.success) {
         setData(json);
         setIsLoggedIn(true);
-        localStorage.setItem(LS_ID_KEY, inputId.trim());
-        localStorage.setItem(`${LS_CACHE_PREFIX}${inputId.trim()}`, JSON.stringify({ t: Date.now(), data: json }));
+        localStorage.setItem(LS_ID_KEY, targetId);
+        localStorage.setItem(`${LS_CACHE_PREFIX}${targetId}`, JSON.stringify({ t: Date.now(), data: json }));
       } else {
-        setError(json?.message || "登入失敗，請確認 ID");
+        setError(json?.message || "登入失敗，請確認 ID 與密碼");
       }
     } catch (err) {
       setError("網路連線錯誤");
@@ -261,8 +275,13 @@ function App() {
   const handleLogout = () => {
     setIsLoggedIn(false);
     setData(null);
-    setInputId('');
+    setPassword('');
+    // 不清除 LS_ID_KEY，讓下次開啟時還記得 ID
+  };
+
+  const handleSwitchAccount = () => {
     localStorage.removeItem(LS_ID_KEY);
+    window.location.reload();
   };
 
   useEffect(() => {
@@ -271,37 +290,23 @@ function App() {
       if (!savedId) return;
       setInputId(savedId);
 
-      // 先用快取秒開（體感更快）
+      // 注意：這裡不自動登入，因為我們需要密碼
+      // 僅載入快取用於顯示介面（若有）
       const cachedRaw = localStorage.getItem(`${LS_CACHE_PREFIX}${savedId}`);
       if (cachedRaw) {
         try {
           const cached = JSON.parse(cachedRaw);
           if (cached && cached.data && cached.data.success) {
-            setData(cached.data);
-            setIsLoggedIn(true);
+            // 先不設定為 isLoggedIn，除非我們有了密碼並重新驗證
           }
         } catch {}
-      }
-
-      setLoading(true);
-      try {
-        const json = await fetchDashboardData(savedId);
-        if (json && json.success) {
-          setData(json);
-          setIsLoggedIn(true);
-          localStorage.setItem(`${LS_CACHE_PREFIX}${savedId}`, JSON.stringify({ t: Date.now(), data: json }));
-        } else {
-          localStorage.removeItem(LS_ID_KEY);
-        }
-      } catch (err) {} finally {
-        setLoading(false);
       }
     };
     void init();
   }, []);
 
   useEffect(() => {
-    if (!isLoggedIn || !data?.player?.id) {
+    if (!isLoggedIn || !data?.player?.id || !password) {
       if (pollTimerRef.current) {
         window.clearInterval(pollTimerRef.current);
         pollTimerRef.current = null;
@@ -310,11 +315,12 @@ function App() {
     }
 
     const playerId = data.player.id;
+    const currentPw = password;
 
     const startPolling = () => {
       pollTimerRef.current = window.setInterval(async () => {
         if (document.visibilityState !== 'visible') return;
-        const json = await fetchDashboardData(playerId);
+        const json = await fetchDashboardData(playerId, currentPw);
         if (json && json.success) {
           setData(() => json);
           localStorage.setItem(`${LS_CACHE_PREFIX}${playerId}`, JSON.stringify({ t: Date.now(), data: json }));
@@ -430,7 +436,7 @@ function App() {
           message: json.message || (json.stolen ? '成功奪回金蛋' : '未能偷到金蛋')
         });
         if (data?.player?.id) {
-          const refreshed = await fetchDashboardData(data.player.id, { force: true });
+          const refreshed = await fetchDashboardData(data.player.id, password, { force: true });
           if (refreshed && refreshed.success) {
             setData(refreshed);
           }
@@ -563,17 +569,43 @@ function App() {
             <h1 className="text-5xl font-weird text-white mb-8 text-center drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">
               營隊大富翁
             </h1>
-            <form onSubmit={handleLogin} className="space-y-6">
+            <form onSubmit={handleLogin} className="space-y-4">
+              {savedId ? (
+                <div className="space-y-2">
+                  <div className="bg-white/20 border-2 border-white/30 p-3 rounded-xl text-white text-center">
+                    <p className="text-sm font-bold opacity-80">歡迎回來</p>
+                    <p className="text-2xl font-black">ID: {savedId}</p>
+                  </div>
+                  <button 
+                    type="button" 
+                    onClick={handleSwitchAccount}
+                    className="w-full text-xs text-yellow-200 underline font-bold"
+                  >
+                    切換其他帳號
+                  </button>
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  placeholder="輸入 ID (e.g. 1001)"
+                  value={inputId}
+                  onChange={(e) => setInputId(e.target.value)}
+                  className="w-full px-4 py-4 bg-white border-4 border-black text-2xl font-bold rounded-xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+                />
+              )}
+              
               <input
-                type="text"
-                placeholder="輸入 ID (e.g. 1001)"
-                value={inputId}
-                onChange={(e) => setInputId(e.target.value)}
+                type="password"
+                placeholder="輸入隊伍密碼"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-4 py-4 bg-white border-4 border-black text-2xl font-bold rounded-xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
               />
+
               {error && <div className="bg-white border-4 border-black p-2 text-red-600 font-bold">{error}</div>}
+              
               <button type="submit" disabled={loading} className="w-full bg-yellow-400 doodle-btn py-4 text-2xl rounded-xl hover:bg-yellow-300">
-                {loading ? "讀取中..." : "開始遊戲"}
+                {loading ? "登入中..." : "開始遊戲"}
               </button>
             </form>
           </div>
@@ -582,7 +614,18 @@ function App() {
     );
   }
 
-  if (!data || !data.player || !data.my_team) return null;
+  if (!data || !data.player || !data.my_team) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#fdf6e3]">
+        <div className="text-2xl font-black animate-bounce">
+          資料讀取中...
+        </div>
+        <button onClick={() => { setIsLoggedIn(false); localStorage.removeItem(LS_ID_KEY); window.location.reload(); }} className="absolute bottom-10 text-sm underline text-gray-500">
+          卡住了？點此重置
+        </button>
+      </div>
+    );
+  }
 
   const isShieldActive = Boolean(data.my_team.is_shield_active);
   const shieldUntil = data.my_team.shield_expiry ? new Date(data.my_team.shield_expiry) : null;
@@ -889,7 +932,7 @@ function App() {
             {activeItemModal === 'glove' && (
                 <div className="space-y-4">
                     <p className="text-md font-bold text-gray-600 bg-red-50 p-3 rounded-xl border-2 border-red-200">
-                        基礎成功率：無盾 60% / 有盾 10%。集氣每 100 點 +1%（最多 +30%）。
+                        基礎成功率：無盾 60% / 有盾 10%。集氣每 20 點 +1%（最多 +70%）。
                     </p>
                     {isGloveOnCooldown && (
                       <div className="bg-red-100 border-2 border-red-400 text-red-800 font-black p-3 rounded-xl">

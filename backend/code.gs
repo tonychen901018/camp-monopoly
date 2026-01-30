@@ -207,23 +207,57 @@ function doGet(e) {
 
     // 行動模式：用 GET 觸發，避免瀏覽器 CORS/no-cors 無法讀取 POST response 的問題
     if (actionType) {
+      if (actionType === "USE_GLOVE") {
+        return jsonResponse_({ success: false, message: "USE_GLOVE 已停用，請使用 START_ATTACK（集氣）" });
+      }
       // --- Team Attack (Charge) APIs ---
       if (actionType === "CHECK_ATTACK_STATUS") {
         const teamId = String(params.team_id || "").trim();
-        if (!teamId) throw new Error("Missing team_id");
+        const studentId = String(params.student_id || "").trim();
+        const password = String(params.pw || "").trim();
+        if (!teamId || !studentId) throw new Error("Missing params");
         const ss = SpreadsheetApp.getActiveSpreadsheet();
+        
+        // 額外驗證
+        const idSheet = getRequiredSheet_(ss, SHEET_NAMES.ID);
+        const idRows = getRowsAsObjectsCached_(idSheet, "cache:id_rows", CACHE_TTL.ID);
+        const student = idRows.find(r => String(r.id) === String(studentId));
+        if (!student) throw new Error("無效學生");
+        verifyTeamPassword_(ss, student, password);
+
         return jsonResponse_(checkAttackStatusFast_(ss, teamId));
       }
       if (actionType === "CHECK_ATTACK_RESULT") {
         const teamId = String(params.team_id || "").trim();
-        if (!teamId) throw new Error("Missing team_id");
+        const studentId = String(params.student_id || "").trim();
+        const password = String(params.pw || "").trim();
+        if (!teamId || !studentId) throw new Error("Missing params");
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        
+        // 額外驗證
+        const idSheet = getRequiredSheet_(ss, SHEET_NAMES.ID);
+        const idRows = getRowsAsObjectsCached_(idSheet, "cache:id_rows", CACHE_TTL.ID);
+        const student = idRows.find(r => String(r.id) === String(studentId));
+        if (!student) throw new Error("無效學生");
+        verifyTeamPassword_(ss, student, password);
+
         return jsonResponse_(checkAttackResultFast_(teamId));
       }
       if (actionType === "SUBMIT_CLICKS") {
         const teamId = String(params.team_id || "").trim();
-        if (!teamId) throw new Error("Missing team_id");
+        const studentId = String(params.student_id || "").trim();
+        const password = String(params.pw || "").trim();
+        if (!teamId || !studentId) throw new Error("Missing params");
         const clicks = Number(params.clicks || 0);
         const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+        // 額外驗證
+        const idSheet = getRequiredSheet_(ss, SHEET_NAMES.ID);
+        const idRows = getRowsAsObjectsCached_(idSheet, "cache:id_rows", CACHE_TTL.ID);
+        const student = idRows.find(r => String(r.id) === String(studentId));
+        if (!student) throw new Error("無效學生");
+        verifyTeamPassword_(ss, student, password);
+
         return jsonResponse_(submitClicksFast_(ss, teamId, clicks));
       }
       if (actionType === "START_ATTACK" || actionType === "FINALIZE_ATTACK") {
@@ -238,13 +272,32 @@ function doGet(e) {
 
     // 讀取模式
     const studentId = String(params.id || "").trim();
+    const password = String(params.pw || "").trim();
     if (!studentId) throw new Error("Missing ID");
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    return jsonResponse_(buildDashboard_(ss, studentId, null));
+    return jsonResponse_(buildDashboard_(ss, studentId, password, null));
 
   } catch (err) {
     return jsonResponse_({ success: false, message: err.toString() });
+  }
+}
+
+/**
+ * 驗證隊伍密碼
+ */
+function verifyTeamPassword_(ss, student, password) {
+  const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS, ["Team"]);
+  const teamRows = getRowsAsObjects_(teamSheet);
+  const myTeam = teamRows.find(r => String(r.team_name) === String(student.team_name));
+  
+  if (!myTeam) throw new Error("找不到隊伍資料");
+  
+  const correctPw = String(myTeam.team_password || "").trim();
+  const inputPw = String(password || "").trim();
+  
+  if (correctPw !== inputPw) {
+    throw new Error("隊伍密碼錯誤！");
   }
 }
 
@@ -260,6 +313,10 @@ function doPost(e) {
     const params = JSON.parse(e.postData.contents);
     const { action, student_id, item_id, target_team_name, qty, item_qty } = params;
     
+    if (action === "USE_GLOVE") {
+      throw new Error("USE_GLOVE 已停用，請使用 START_ATTACK（集氣）");
+    }
+
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     
     // 1. 驗證學生
@@ -437,6 +494,7 @@ function handleTeamAttackAction_(ss, actionType, params) {
 
     const colTeamId = headers.indexOf("team_id");
     const colTeamName = headers.indexOf("team_name");
+    const colMoney = headers.indexOf("money");
     const colGloves = headers.indexOf("gloves");
     const colShieldExpiry = headers.indexOf("shield_expiry");
     const colHasEgg = headers.indexOf("has_egg");
@@ -458,11 +516,16 @@ function handleTeamAttackAction_(ss, actionType, params) {
     }
 
     const studentId = String(params.student_id || "").trim();
+    const password = String(params.pw || "").trim();
     if (!studentId) throw new Error("Missing student_id");
     const idSheet = getRequiredSheet_(ss, SHEET_NAMES.ID);
     const idRows = getRowsAsObjectsCached_(idSheet, "cache:id_rows", CACHE_TTL.ID);
     const student = idRows.find(r => String(r.id) === String(studentId));
     if (!student) throw new Error("無效的學生 ID");
+
+    // 驗證密碼
+    verifyTeamPassword_(ss, student, password);
+
     if (String(student.role || "").trim().toUpperCase() !== "LEADER") {
       throw new Error("只有小隊長可以使用此功能！");
     }
@@ -520,7 +583,7 @@ function handleTeamAttackAction_(ss, actionType, params) {
       teamSheet.getRange(attackerIdx + 1, colGloveWindowStart + 1).setValue(nextWindowStart.toISOString());
       teamSheet.getRange(attackerIdx + 1, colGloveWindowCount + 1).setValue(nextCount);
 
-      if (nextCount >= 3) {
+      if (nextCount >= 5) {
         const cdUntil = new Date(now.getTime() + 20 * 60 * 1000);
         teamSheet.getRange(attackerIdx + 1, colGloveCooldownUntil + 1).setValue(cdUntil.toISOString());
         teamSheet.getRange(attackerIdx + 1, colGloveWindowStart + 1).setValue("");
@@ -588,7 +651,8 @@ function handleTeamAttackAction_(ss, actionType, params) {
       }
 
       const baseRate = isProtected ? 0.1 : 0.6;
-      const bonusRate = Math.min(0.3, Math.floor(totalClicks / 100) * 0.01);
+      // 新邏輯：每 20 下 +1%，最高加成 +70% (1400 下即滿)
+      const bonusRate = Math.min(0.7, (totalClicks / 20) * 0.01);
       const successRate = Math.min(0.95, baseRate + bonusRate);
       const roll = Math.random();
       const isSuccess = roll < successRate;
@@ -615,8 +679,25 @@ function handleTeamAttackAction_(ss, actionType, params) {
           logToSheet(ss, attackerTeamName, "TEAM_ATTACK", detail, "SUCCESS_EMPTY");
         }
       } else {
-        message = isProtected ? "偷竊失敗：對方有防護罩" : "偷竊失敗：運氣不佳";
-        logToSheet(ss, attackerTeamName, "TEAM_ATTACK", detail, "FAILED");
+        // --- 偷竊失敗：偷錢補償機制 ---
+        const stealOptions = [100, 150, 200, 250, 300];
+        const wantSteal = stealOptions[Math.floor(Math.random() * stealOptions.length)];
+        
+        const targetMoney = Number(teamData[targetIdx][colMoney] || 0);
+        const actualStolen = Math.min(targetMoney, wantSteal);
+        
+        const attackerMoney = Number(teamData[attackerIdx][colMoney] || 0);
+        
+        // 更新雙方金錢
+        if (actualStolen > 0) {
+          teamSheet.getRange(targetIdx + 1, colMoney + 1).setValue(targetMoney - actualStolen);
+          teamSheet.getRange(attackerIdx + 1, colMoney + 1).setValue(attackerMoney + actualStolen);
+        }
+
+        message = (isProtected ? "偷竊失敗：對方有防護罩" : "偷竊失敗：運氣不佳") + 
+                  (actualStolen > 0 ? `，但順手牽羊偷走了 $${actualStolen}！` : "。");
+        
+        logToSheet(ss, attackerTeamName, "TEAM_ATTACK", detail + `, StolenMoney=${actualStolen}`, "FAILED_BUT_STOLE_MONEY");
       }
 
       // 清理 sheet
@@ -656,9 +737,10 @@ function handleActionAndReturnDashboard_(actionType, params, studentId) {
   }
 
   try {
+    const password = String(params.pw || "").trim();
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const actionResult = runAction_(ss, actionType, params, studentId);
-    const dashboard = buildDashboard_(ss, studentId, actionResult);
+    const actionResult = runAction_(ss, actionType, params, studentId, password);
+    const dashboard = buildDashboard_(ss, studentId, password, actionResult);
     lock.releaseLock();
     return jsonResponse_(dashboard);
   } catch (err) {
@@ -667,12 +749,15 @@ function handleActionAndReturnDashboard_(actionType, params, studentId) {
   }
 }
 
-function buildDashboard_(ss, studentId, actionResultOrNull) {
+function buildDashboard_(ss, studentId, password, actionResultOrNull) {
   // 1. 驗證學生
   const idSheet = getRequiredSheet_(ss, SHEET_NAMES.ID);
   const idRows = getRowsAsObjectsCached_(idSheet, "cache:id_rows", CACHE_TTL.ID);
   const student = idRows.find(r => String(r.id) === String(studentId));
   if (!student) throw new Error("無效的學生 ID");
+
+  // 驗證密碼
+  verifyTeamPassword_(ss, student, password);
 
   // 2. 獲取隊伍資料
   const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS, ["Team"]);
@@ -742,6 +827,7 @@ function buildDashboard_(ss, studentId, actionResultOrNull) {
     shop_items: shopItems,
     global: {
       location: {
+        id: String(statusRow.location_id || ""),
         name: String(statusRow.location_name || ""),
         description: mapInfo ? String(mapInfo.description) : ""
       },
@@ -752,12 +838,15 @@ function buildDashboard_(ss, studentId, actionResultOrNull) {
   return res;
 }
 
-function runAction_(ss, actionType, params, studentId) {
+function runAction_(ss, actionType, params, studentId, password) {
   // 驗證學生與 role
   const idSheet = getRequiredSheet_(ss, SHEET_NAMES.ID);
   const idRows = getRowsAsObjectsCached_(idSheet, "cache:id_rows", CACHE_TTL.ID);
   const student = idRows.find(r => String(r.id) === String(studentId));
   if (!student) throw new Error("無效的學生 ID");
+
+  // 驗證密碼
+  verifyTeamPassword_(ss, student, password);
 
   if (String(student.role || "").trim().toUpperCase() !== "LEADER") {
     throw new Error("只有小隊長可以使用此功能！");
@@ -841,7 +930,7 @@ function runAction_(ss, actionType, params, studentId) {
     if (targetTeamName === String(student.team_name)) throw new Error("不能偷自己！");
 
     // --- 黑手套 CD 規則 ---
-    // 5 分鐘內使用第 3 次後，進入 20 分鐘冷卻（第三次仍允許出手）
+    // 5 分鐘內使用第 5 次後，進入 20 分鐘冷卻（第五次仍允許出手）
     if (colGloveWindowStart === -1 || colGloveWindowCount === -1 || colGloveCooldownUntil === -1) {
       throw new Error("缺少冷卻欄位：請在 Teams 新增 glove_window_start / glove_window_count / glove_cooldown_until");
     }
@@ -872,7 +961,7 @@ function runAction_(ss, actionType, params, studentId) {
     teamSheet.getRange(myTeamIndex + 1, colGloveWindowStart + 1).setValue(nextWindowStart.toISOString());
     teamSheet.getRange(myTeamIndex + 1, colGloveWindowCount + 1).setValue(nextCount);
 
-    if (nextCount >= 3) {
+    if (nextCount >= 5) {
       const cdUntil = new Date(now.getTime() + 20 * 60 * 1000);
       teamSheet.getRange(myTeamIndex + 1, colGloveCooldownUntil + 1).setValue(cdUntil.toISOString());
       // 重置視窗，避免冷卻結束後立刻因舊數據觸發
