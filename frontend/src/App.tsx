@@ -341,7 +341,7 @@ function App() {
   // 登入文案輪播
   useEffect(() => {
     if (!loading) return;
-    const messages = ["正在與雞哥進行連接...", "凱因斯經濟模型中..."];
+    const messages = ["正在與雞哥進行連接...", "凱因斯計算模型中..."];
     let idx = 0;
     const timer = window.setInterval(() => {
       idx = (idx + 1) % messages.length;
