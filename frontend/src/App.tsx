@@ -837,7 +837,7 @@ function App() {
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-xl w-fit border-2 border-black/10 shadow-sm">
               <MapPin size={20} strokeWidth={3} />
-              <h3 className="text-lg font-black">目前戰況</h3>
+              <h3 className="text-lg font-black">目前座標</h3>
             </div>
 
             <button onClick={() => setIsLocationModalOpen(true)} className="w-full mb-6 bg-white/90 backdrop-blur-sm p-4 border-4 border-black rounded-2xl hover:bg-white transition-all text-left relative active:scale-[0.98] flex items-center gap-4">
@@ -871,8 +871,8 @@ function App() {
                   onClick={() =>
                     setSelectedAchievement({
                       ...ach,
-                      title: ach.title && ach.title !== "????" ? ach.title : "未解鎖成就",
-                      description: ach.description && ach.description !== "????" ? ach.description : "完成條件尚未公開"
+                      title: ach.is_unlocked ? (ach.title || "未知成就") : "未知成就",
+                      description: ach.is_unlocked ? (ach.description || "") : "？？？？"
                     })
                   }
                   className={`w-16 h-16 rounded-full border-4 border-black flex items-center justify-center shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] active:translate-y-1 active:shadow-none transition-all ${ach.is_unlocked ? 'bg-yellow-400' : 'bg-gray-200'}`}
