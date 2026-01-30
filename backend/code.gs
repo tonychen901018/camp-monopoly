@@ -63,7 +63,7 @@ function getAttackResultCacheKey_(teamId) {
 }
 
 function readAttackStatusFromSheet_(ss, teamId) {
-  const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS, ["Team"]);
+  const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS);
   const teamData = teamSheet.getDataRange().getValues();
   const headers = teamData[0].map(h => String(h).trim().toLowerCase());
   const colTeamId = headers.indexOf("team_id");
@@ -284,20 +284,22 @@ function doGet(e) {
 }
 
 /**
- * 驗證隊伍密碼
+ * 驗證密碼 (從 ID 表的 password 欄位驗證)
  */
 function verifyTeamPassword_(ss, student, password) {
-  const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS, ["Team"]);
-  const teamRows = getRowsAsObjects_(teamSheet);
-  const myTeam = teamRows.find(r => String(r.team_name) === String(student.team_name));
-  
-  if (!myTeam) throw new Error("找不到隊伍資料");
-  
-  const correctPw = String(myTeam.team_password || "").trim();
+  // 從 student 物件中直接獲取預期的密碼
+  // 假設 ID 表有 "password" 欄位
+  const correctPw = String(student.password || "").trim();
   const inputPw = String(password || "").trim();
   
+  if (!correctPw) {
+    // 如果 ID 表沒設定密碼，暫時允許通過，或拋出錯誤 (視需求而定)
+    // 這裡我們嚴格一點，要求必須設定密碼
+    throw new Error("系統錯誤：該帳號未設定密碼，請聯繫管理員");
+  }
+
   if (correctPw !== inputPw) {
-    throw new Error("隊伍密碼錯誤！");
+    throw new Error("密碼錯誤！");
   }
 }
 
@@ -330,7 +332,7 @@ function doPost(e) {
       throw new Error("只有小隊長可以使用此功能！");
     }
 
-    const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS, ["Team"]);
+    const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS);
     // 這裡我們還是要用原始方法寫入，不能用 getRowsAsObjects_ 因為要寫回
     const teamData = teamSheet.getDataRange().getValues();
     // 標題轉小寫以便尋找 index
@@ -488,7 +490,7 @@ function handleTeamAttackAction_(ss, actionType, params) {
   }
 
   try {
-    const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS, ["Team"]);
+    const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS);
     const teamData = teamSheet.getDataRange().getValues();
     const headers = teamData[0].map(h => String(h).trim().toLowerCase());
 
@@ -760,7 +762,7 @@ function buildDashboard_(ss, studentId, password, actionResultOrNull) {
   verifyTeamPassword_(ss, student, password);
 
   // 2. 獲取隊伍資料
-  const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS, ["Team"]);
+  const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS);
   const teamRows = getRowsAsObjects_(teamSheet);
   const myTeam = teamRows.find(r => String(r.team_name) === String(student.team_name));
   if (!myTeam) throw new Error("找不到所屬隊伍資料");
@@ -852,7 +854,7 @@ function runAction_(ss, actionType, params, studentId, password) {
     throw new Error("只有小隊長可以使用此功能！");
   }
 
-  const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS, ["Team"]);
+  const teamSheet = getRequiredSheet_(ss, SHEET_NAMES.TEAMS);
   const teamData = teamSheet.getDataRange().getValues();
   const headers = teamData[0].map(h => String(h).trim().toLowerCase());
 
