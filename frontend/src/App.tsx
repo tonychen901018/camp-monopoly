@@ -29,6 +29,7 @@ function App() {
   const [inputId, setInputId] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState("正在與雞哥進行連接...");
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -337,9 +338,21 @@ function App() {
     };
   }, [isLoggedIn, data?.player?.id]);
 
-  // 倒數計時用（黑手套冷卻顯示）
+  // 登入文案輪播
   useEffect(() => {
-    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
+    if (!loading) return;
+    const messages = ["正在與雞哥進行連接...", "凱因斯經濟模型中..."];
+    let idx = 0;
+    const timer = window.setInterval(() => {
+      idx = (idx + 1) % messages.length;
+      setLoadingMessage(messages[idx]);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [loading]);
+
+  // 倒數計時用（提高頻率讓進度條流暢）
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(Date.now()), 100);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -604,8 +617,8 @@ function App() {
 
               {error && <div className="bg-white border-4 border-black p-2 text-red-600 font-bold">{error}</div>}
               
-              <button type="submit" disabled={loading} className="w-full bg-yellow-400 doodle-btn py-4 text-2xl rounded-xl hover:bg-yellow-300">
-                {loading ? "登入中..." : "開始遊戲"}
+              <button type="submit" disabled={loading} className="w-full bg-yellow-400 doodle-btn py-4 text-xl rounded-xl hover:bg-yellow-300">
+                {loading ? loadingMessage : "開始遊戲"}
               </button>
             </form>
           </div>
@@ -973,7 +986,7 @@ function App() {
       {isChargeOpen && attackWindowEndDate && (
         <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white border-4 border-black p-6 rounded-3xl max-w-sm w-full shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-            <h3 className="text-2xl font-black mb-2">全隊同步集氣</h3>
+            <h3 className="text-2xl font-black mb-2">黑手套集氣中！</h3>
             <p className="text-sm font-bold text-gray-600 mb-3">目標：{currentTargetName}</p>
             <div className="w-full h-3 bg-gray-200 border-2 border-black rounded-full overflow-hidden mb-3">
               <div
@@ -985,9 +998,15 @@ function App() {
             <button
               onClick={handleChargeClick}
               disabled={!isAttackActive}
-              className="w-full h-32 bg-yellow-400 border-4 border-black rounded-2xl font-black text-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-y-1 active:shadow-none disabled:opacity-50"
+              className={`w-full h-32 border-4 border-black rounded-2xl font-black text-2xl shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-y-1 active:shadow-none transition-colors duration-200 disabled:opacity-50 ${
+                chargeClicks >= 90 ? 'bg-red-600 text-white' : 
+                chargeClicks >= 50 ? 'bg-orange-500 text-white' : 
+                'bg-yellow-400 text-black'
+              }`}
             >
-              狂點集氣
+              {chargeClicks >= 90 ? "無情爆點機器⚙️！" : 
+               chargeClicks >= 50 ? "🔥瘋狂爆點🔥!" : 
+               "狂點集氣"}
             </button>
             <div className="mt-4 text-center">
               <div className="text-xl font-black">Combo：{chargeClicks}</div>
@@ -1013,7 +1032,9 @@ function App() {
                 )}
             </div>
             <h3 className="text-2xl font-black mb-2">{resultModal.title}</h3>
-            <p className="text-lg font-bold text-gray-600 mb-6 whitespace-pre-wrap">{resultModal.message}</p>
+            <p className="text-lg font-bold text-gray-600 mb-6 whitespace-pre-wrap">
+                {resultModal.message.includes('：') ? resultModal.message.split('：')[1] : resultModal.message}
+            </p>
             {resultModal.title !== '處理中…' && (
                 <button 
                 onClick={() => setResultModal(prev => ({ ...prev, isOpen: false }))}
