@@ -580,7 +580,7 @@ function App() {
         <div className="w-full max-w-md relative z-10">
           <div className="doodle-card bg-[#FF6B6B] p-8 -rotate-1 rounded-3xl">
             <h1 className="text-5xl font-weird text-white mb-8 text-center drop-shadow-[4px_4px_0px_rgba(0,0,0,1)]">
-              營隊大富翁
+              經濟之國
             </h1>
             <form onSubmit={handleLogin} className="space-y-4">
               {savedId ? (
